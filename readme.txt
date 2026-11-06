@@ -90,6 +90,14 @@ Yes. If every visitor appears with the proxy's address, return the real address 
 
 Yes. Add the staging host to the protected site in your account, or define `FORMCONFIRMED_API` in wp-config.php to point to another instance of the service.
 
+== Screenshots ==
+
+1. Overview: status, connection test and what happened since activation.
+2. Forms: switch every form of Contact Form 7, WPForms, Gravity Forms, Fluent Forms and Formidable on or off.
+3. Settings: keys, message check, backup check and what happens to messages that are not a clear pass.
+4. What visitors see: a normal form with a small badge - nothing to solve.
+5. Developers: shortcode, PHP functions and filters for forms of your own.
+
 == Changelog ==
 
 = 1.0.0 =
@@ -99,3 +107,8 @@ Yes. Add the staging host to the protected site in your account, or define `FORM
 * Backup check on your own server, so messages are not lost or let through unchecked while the service cannot be reached.
 * Held messages: 14 days, delivered with one click.
 * Takes over the settings of the formexposed form protection tab.
+
+== Upgrade Notice ==
+
+= 1.0.0 =
+First version.
