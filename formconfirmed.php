@@ -3,7 +3,7 @@
  * Plugin Name:       formconfirmed – Invisible spam protection for forms
  * Plugin URI:        https://formconfirmed.com/
  * Description:       Invisible spam protection for Contact Form 7, WPForms, Gravity Forms, Elementor Pro, Fluent Forms, Formidable, comments, registration and login: proof of work, timing and trap-field signals and an optional message check, hosted in the EU. No puzzles, no cookies.
- * Version:           1.0.0
+ * Version:           1.1.0
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            LW IT Solutions
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'FORMCONFIRMED_VERSION', '1.0.0' );
+define( 'FORMCONFIRMED_VERSION', '1.1.0' );
 define( 'FORMCONFIRMED_FILE', __FILE__ );
 
 // The address of the service (includes/services.json). wp-config.php may override it for staging:
@@ -39,6 +39,7 @@ require_once __DIR__ . '/includes/class-formconfirmed.php';
 require_once __DIR__ . '/includes/class-formconfirmed-backup.php';
 require_once __DIR__ . '/includes/class-formconfirmed-held.php';
 require_once __DIR__ . '/includes/class-formconfirmed-admin.php';
+require_once __DIR__ . '/includes/class-formconfirmed-connect.php';
 require_once __DIR__ . '/includes/functions.php';
 
 register_activation_hook( __FILE__, array( 'Formconfirmed_Core', 'activate' ) );
@@ -49,6 +50,7 @@ add_action( 'plugins_loaded', array( 'Formconfirmed_Core', 'init' ), 25 );
 add_action( 'plugins_loaded', array( 'Formconfirmed_Backup', 'init' ), 25 );
 add_action( 'plugins_loaded', array( 'Formconfirmed_Held', 'init' ), 25 );
 add_action( 'plugins_loaded', array( 'Formconfirmed_Admin', 'init' ), 25 );
+add_action( 'plugins_loaded', array( 'Formconfirmed_Connect', 'init' ), 25 );
 
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
 	require_once __DIR__ . '/includes/class-formconfirmed-cli.php';

@@ -411,7 +411,7 @@ class Formconfirmed_Core {
 	/**
 	 * Asks the verify API.
 	 * $data:    where the token and the trap field are (null: the POST request; Fluent Forms: its parsed data).
-	 * $content: message text for the content check (only if switched on; checked in memory, not stored).
+	 * $content: message text for the content check (only if switched on; briefly processed by the service, with a temporary queue for AI checks).
 	 * $email:   the e-mail address of the form (disposable providers, domains without mail).
 	 * Returns array(action, score, reasons, unavailable, codes).
 	 */

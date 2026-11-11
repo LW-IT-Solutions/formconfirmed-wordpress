@@ -428,6 +428,7 @@ class Formconfirmed_Admin {
 	private static function page_settings() {
 		$o = Formconfirmed_Core::opt();
 		?>
+		<?php Formconfirmed_Connect::panel(); ?>
 		<?php if ( self::formexposed_linked() ) : ?>
 		<div class="fc-card fc-card-tight">
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
@@ -463,7 +464,7 @@ class Formconfirmed_Admin {
 				<h2><?php esc_html_e( 'Checks', 'formconfirmed' ); ?></h2>
 				<div class="fc-row">
 					<?php self::toggle( 'content', $o['content'], __( 'Check the message text', 'formconfirmed' ), 'fc-content' ); ?>
-					<p class="description"><?php esc_html_e( 'Sends the message text along: spam filter in every plan, AI check where your plan includes it. Checked in memory, not stored.', 'formconfirmed' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Sends the message text along: spam filter in every plan, AI check where your plan includes it. Processed briefly on the service servers. AI checks use a temporary internal queue.', 'formconfirmed' ); ?></p>
 				</div>
 				<div class="fc-row">
 					<?php self::toggle( 'backup', $o['backup'], __( 'Backup check on this site', 'formconfirmed' ), 'fc-backup' ); ?>
@@ -721,7 +722,7 @@ class Formconfirmed_Admin {
 		if ( ! function_exists( 'wp_add_privacy_policy_content' ) ) {
 			return;
 		}
-		$text = __( 'Our forms are protected by formconfirmed, a service of LW IT Solutions with servers in the EU. On pages with a protected form your browser loads a script of the service and solves a small calculation task; no cookies are set and nothing is stored on your device. When you send the form, this website sends the result, your IP address, the e-mail address entered in the form and - if enabled - the message text to the service, which checks them for spam and returns a decision. The message text is checked in memory and not stored; the IP address is only kept shortened and hashed. If the check cannot be completed, your message is delivered only after an independent check on this website; otherwise it is held for review or refused, not delivered unchecked. Messages that are not passed are kept on this website for 14 days so they can be reviewed.', 'formconfirmed' );
+		$text = __( 'Our forms are protected by formconfirmed, a service of LW IT Solutions with servers in the EU. On pages with a protected form your browser loads a script of the service and solves a small calculation task; no cookies are set and nothing is stored on your device. When you send the form, this website sends the result, your IP address, the e-mail address entered in the form and - if enabled - the message text to the service, which checks them for spam and returns a decision. The message text is processed briefly on the service servers. AI checks use a temporary internal queue. The IP address is only kept shortened and hashed. If the check cannot be completed, your message is delivered only after an independent check on this website; otherwise it is held for review or refused, not delivered unchecked. Messages that are not passed are kept on this website for 14 days so they can be reviewed.', 'formconfirmed' );
 		wp_add_privacy_policy_content( 'formconfirmed', wpautop( esc_html( $text ) ) );
 	}
 }

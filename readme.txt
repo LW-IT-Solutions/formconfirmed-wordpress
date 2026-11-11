@@ -4,7 +4,7 @@ Tags: spam, anti-spam, captcha, contact form 7, honeypot
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,7 +30,7 @@ formconfirmed stops automated form spam without asking your visitors to solve an
 * An invisible proof of work: every submission costs the sender computing time. A person does not notice it (well under a second, even on a phone); a bot that sends thousands of messages pays for every one.
 * Timing and a trap field: too fast, or a field only a bot fills in.
 * The e-mail address: throw-away providers, domains that cannot receive mail.
-* Optional: the message text (spam filter in every plan, an AI check where your plan includes it). Checked in memory, never stored.
+* Optional: the message text (spam filter in every plan, an AI check where your plan includes it). Processed briefly on the service servers. AI checks use a temporary internal queue.
 
 **No puzzles, no cookies.** Nothing is stored on the visitor's device and nothing is tracked, so the protection itself needs no consent banner. There is nothing to click, so it is no obstacle for screen readers, keyboards or voice control.
 
@@ -51,7 +51,7 @@ The free plan includes 50,000 checks a month. Above the quota nothing is switche
 This plugin connects to **formconfirmed**, a form protection service run by LW IT Solutions (Lukas Wojcik) on servers in the EU. It is needed to tell people from bots; without the service's keys the plugin does nothing.
 
 * **In the visitor's browser**, on pages with a protected form: the widget script `https://formconfirmed.com/v1/widget.js` is loaded. It fetches a small task from `https://formconfirmed.com/v1/challenge` (sending the site key, the page's host and language) and solves it. No cookies are set, nothing is stored on the device.
-* **On your server**, when a protected form is sent: the plugin sends the token from the browser, your secret key, the visitor's IP address, the content of the trap field, the form type, the first e-mail address entered in the form and - only if you switch on the message check - the message text (up to 2,000 characters) to `https://formconfirmed.com/v1/verify`. The service returns allow, flag or block with the reasons. The message text is checked in memory and not stored; IP addresses are only kept shortened and hashed.
+* **On your server**, when a protected form is sent: the plugin sends the token from the browser, your secret key, the visitor's IP address, the content of the trap field, the form type, the first e-mail address entered in the form and - only if you switch on the message check - the message text (up to 2,000 characters) to `https://formconfirmed.com/v1/verify`. The service returns allow, flag or block with the reasons. The message text is briefly processed on the service servers. AI checks use a temporary internal queue. IP addresses are only kept shortened and hashed.
 * **In the admin**, when you click *Test the connection*: a request to `https://formconfirmed.com/v1/health` and a test request to `/v1/verify` with your secret key.
 * **Only if the formexposed plugin is installed and connected** and you click *Get keys from my account*: a request to `https://formexposed.com/api/plugin/protect` with the site address and the connection keys of the formexposed plugin.
 
@@ -60,10 +60,12 @@ Privacy policy: https://formconfirmed.com/en/legal/privacy
 
 The backup check runs on your own server only and sends nothing anywhere.
 
+The optional account connection sends this site hostname and a verifier hash to /v1/connect/start. After your approval in your account, /v1/connect/poll transfers the keys once to this WordPress server. Requests expire after ten minutes. The verifier and secret key are never put into the approval URL.
+
 == Installation ==
 
 1. Install and activate the plugin.
-2. Settings → formconfirmed: enter the site key and the secret key from your formconfirmed account.
+2. Settings → formconfirmed: choose Connect with formconfirmed, approve the displayed site and request code in your account, then complete the connection. You can also enter both keys manually.
 3. Click *Test the connection*.
 
 If a page cache or CDN serves your pages, clear it once after saving, so the forms carry the protection.
@@ -100,6 +102,11 @@ Yes. Add the staging host to the protected site in your account, or define `FORM
 
 == Changelog ==
 
+= 1.1.0 =
+* Connect directly with your formconfirmed account using an expiring request and a server-side verifier.
+* Clearer information about temporary message processing.
+
+
 = 1.0.0 =
 * Contact Form 7, WPForms, Gravity Forms, Elementor Pro, Fluent Forms, Formidable, comments, registration (WordPress, WooCommerce) and login (optional).
 * A switch for every single form of Contact Form 7, WPForms, Gravity Forms, Fluent Forms and Formidable; new forms are protected automatically.
@@ -109,6 +116,9 @@ Yes. Add the staging host to the protected site in your account, or define `FORM
 * Takes over the settings of the formexposed form protection tab.
 
 == Upgrade Notice ==
+
+= 1.1.0 =
+Adds direct account approval for securely connecting WordPress.
 
 = 1.0.0 =
 First version.
