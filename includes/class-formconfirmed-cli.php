@@ -22,9 +22,29 @@ class Formconfirmed_CLI {
 		WP_CLI::log( 'Unclear:       ' . $o['uncertain'] );
 		WP_CLI::log( 'Backup check:  ' . ( Formconfirmed_Backup::delegated() ? 'formexposed protection layer' : ( Formconfirmed_Backup::own() ? 'own' : 'off' ) ) );
 		WP_CLI::log( 'Held (open):   ' . Formconfirmed_Held::count_open() );
+		$m = Formconfirmed_Held::maintenance_status();
+		WP_CLI::log( 'Cleanup query: ' . ( $m['available'] ? 'ok' : 'unavailable' ) );
+		WP_CLI::log( 'Overdue held:  ' . $m['overdue'] );
+		WP_CLI::log( 'Cleanup OK:    ' . ( $m['last_success'] ? gmdate( 'c', $m['last_success'] ) : 'not run yet' ) );
+		WP_CLI::log( 'Cleanup next:  ' . ( $m['next_run'] ? gmdate( 'c', $m['next_run'] ) : 'not scheduled' ) );
 		foreach ( $o['stats'] as $k => $v ) {
 			WP_CLI::log( str_pad( $k . ':', 15 ) . (int) $v );
 		}
+	}
+
+	/**
+	 * Runs one bounded quarantine cleanup batch (remaining work is scheduled).
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp formconfirmed cleanup
+	 */
+	public function cleanup() {
+		$n = Formconfirmed_Held::purge();
+		$s = Formconfirmed_Held::maintenance_status();
+		if ( ! $s['available'] || $s['failed'] ) { WP_CLI::warning( 'Cleanup could not finish; check storage and the next scheduled run.' ); }
+		WP_CLI::log( 'Deleted in this batch: ' . (int) $n );
+		WP_CLI::log( 'Overdue remaining:     ' . $s['overdue'] );
 	}
 
 	/**

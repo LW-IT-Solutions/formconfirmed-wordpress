@@ -61,3 +61,7 @@
 @media (prefers-reduced-motion:reduce){.fc-switch-ui,.fc-switch-ui::after{transition:none}}
 @media (max-width:782px){.fc-card{padding:12px 14px}.fc-row .description{margin-left:0}.fc-forms th:last-child,.fc-forms td:last-child{display:none}
 .fc-held thead{display:none}.fc-held,.fc-held tbody,.fc-held tr,.fc-held td{display:block;width:auto}.fc-held tr{padding:8px 0;border-bottom:1px solid var(--fc-line)}.fc-held td{padding:3px 12px;word-break:break-word}.fc-held td:first-child{color:var(--fc-muted);font-size:12px}.fc-held td.fc-nowrap{white-space:normal;padding-top:8px}}
+
+.fc-table-scroll{max-width:100%;overflow-x:auto;margin:12px 0}.fc-filter{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:16px 0}.fc-filter label{display:flex;flex-direction:column;gap:4px}.fc-filter input,.fc-filter select{max-width:100%}.fc-pagination{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}.fc-table-scroll select{max-width:100%}@media(max-width:600px){.fc-filter label{width:100%}.fc-filter input,.fc-filter select{width:100%}.fc-held td{min-width:100px}.fc-held td:nth-child(4){min-width:220px}}
+
+.fc-feedback{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.fc-feedback form{margin:0}.fc-wrap :focus-visible{outline:3px solid #2271b1;outline-offset:3px}

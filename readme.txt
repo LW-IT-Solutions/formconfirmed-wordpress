@@ -4,7 +4,7 @@ Tags: spam, anti-spam, captcha, contact form 7, honeypot
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -51,16 +51,17 @@ The free plan includes 50,000 checks a month. Above the quota nothing is switche
 This plugin connects to **formconfirmed**, a form protection service run by LW IT Solutions (Lukas Wojcik) on servers in the EU. It is needed to tell people from bots; without the service's keys the plugin does nothing.
 
 * **In the visitor's browser**, on pages with a protected form: the widget script `https://formconfirmed.com/v1/widget.js` is loaded. It fetches a small task from `https://formconfirmed.com/v1/challenge` (sending the site key, the page's host and language) and solves it. No cookies are set, nothing is stored on the device.
-* **On your server**, when a protected form is sent: the plugin sends the token from the browser, your secret key, the visitor's IP address, the content of the trap field, the form type, the first e-mail address entered in the form and - only if you switch on the message check - the message text (up to 2,000 characters) to `https://formconfirmed.com/v1/verify`. The service returns allow, flag or block with the reasons. The message text is briefly processed on the service servers. AI checks use a temporary internal queue. IP addresses are only kept shortened and hashed.
+* **On your server**, when a protected form is sent: the plugin sends the token from the browser, your secret key, the visitor's IP address, the content of the trap field, the form type, the opaque form reference (never a form title), the first e-mail address entered in the form and - only if you switch on the message check - the message text (up to 2,000 characters) and the mapped contact name, registration username or comment author (up to 200 characters; never a password) to `https://formconfirmed.com/v1/verify`. The service returns allow, flag or block with the reasons. The message text is briefly processed on the service servers. AI checks use a temporary internal queue. IP addresses are only kept shortened and hashed.
 * **In the admin**, when you click *Test the connection*: a request to `https://formconfirmed.com/v1/health` and a test request to `/v1/verify` with your secret key.
+* **Account connection (optional)**, when you click *Connect with formconfirmed*: the site hostname and a hash of a random verifier are sent to `https://formconfirmed.com/v1/connect/start`. You approve the request in your account at `https://formconfirmed.com/wordpress-connect`. When you complete the connection, the request code and the verifier are sent to `https://formconfirmed.com/v1/connect/poll`, which hands over the keys once. Requests expire after ten minutes; the verifier and the secret key are never part of the approval address.
+* **Technical integration report**, after a successful connection test, hourly through WordPress cron while the protection is on and not paused, and when you click *Send report now*: the site key, the site hostname, the service and widget addresses, the plugin component and its version are sent to `https://formconfirmed.com/v1/integration`, signed with a key derived from your secret key. No visitor data, no form contents, no secret key.
+* **Feedback (optional)**, only when you click *Not spam* or *Spam* on a held message: your secret key, the opaque check ID of that message and your rating are sent to `https://formconfirmed.com/v1/feedback`. No message fields.
 * **Only if the formexposed plugin is installed and connected** and you click *Get keys from my account*: a request to `https://formexposed.com/api/plugin/protect` with the site address and the connection keys of the formexposed plugin.
 
 Terms of use: https://formconfirmed.com/en/legal/terms
 Privacy policy: https://formconfirmed.com/en/legal/privacy
 
 The backup check runs on your own server only and sends nothing anywhere.
-
-The optional account connection sends this site hostname and a verifier hash to /v1/connect/start. After your approval in your account, /v1/connect/poll transfers the keys once to this WordPress server. Requests expire after ten minutes. The verifier and secret key are never put into the approval URL.
 
 == Installation ==
 
@@ -69,6 +70,18 @@ The optional account connection sends this site hostname and a verifier hash to 
 3. Click *Test the connection*.
 
 If a page cache or CDN serves your pages, clear it once after saving, so the forms carry the protection.
+
+== Quarantine cleanup ==
+
+The plugin's own quarantine keeps held and released messages for 14 days. Cleanup removes at most 100 expired messages per batch. Remaining work schedules one follow-up batch after a minute; storage errors or blocked entries back off for an hour. It never sends mail. The Held messages screen shows overdue counts, the last successful batch and the next scheduled run. Site Health warns about stalled cleanup. If formexposed keeps messages instead, its retention remains separate; this status concerns any entries in formconfirmed's own quarantine.
+
+WordPress cron normally needs visits. On low-traffic sites, configure your hosting scheduler to run due WordPress events every five minutes, using the actual site path and the site's operating-system account:
+
+    */5 * * * * cd /absolute/path/to/wordpress && wp cron event run --due-now --quiet
+
+If WP-CLI is unavailable, ask your host to configure WordPress cron. Enable DISABLE_WP_CRON only after confirming that the system scheduler works. Do not publish secret scheduler URLs.
+
+For diagnostics: wp formconfirmed status. To run one bounded cleanup batch manually: wp formconfirmed cleanup. Remaining expired messages continue through scheduled batches. Deactivating the plugin removes both its recurring cleanup and its follow-up event.
 
 == Frequently Asked Questions ==
 
@@ -100,12 +113,57 @@ Yes. Add the staging host to the protected site in your account, or define `FORM
 4. What visitors see: a normal form with a small badge - nothing to solve.
 5. Developers: shortcode, PHP functions and filters for forms of your own.
 
+== Field mapping ==
+
+Settings → formconfirmed → Field mapping lists saved definitions from Contact Form 7, WPForms, Gravity Forms, Fluent Forms and Formidable. Choose Automatic, Name, Email, Message or Ignore per field. The detected effective use is displayed without loading visitor values. Hidden fields, passwords, uploads, unknown types and sensitive identifiers cannot be enabled. Custom code can use the formconfirmed_field_roles filter (roles, adapter, form ID); Elementor uses its server-owned record definitions and this filter.
+
+For your own forms, pass the name explicitly as well as the message:
+
+    $result = formconfirmed_check( array( 'purpose' => 'contact', 'name' => $name, 'email' => $email, 'content' => $message ) );
+
+The fields argument is only the local held-message copy; it does not select the API name or message. The optional text check controls both name and message transmission.
+
+Held messages show 50 entries per page, a form-name search, UTC date bounds and filters for waiting, uncertain delivery and passed-to-mailer status. A pending or uncertain delivery is never resent automatically.
+
+== Technical reports and form references ==
+
+The plugin sends a small authenticated technical report after a successful connection test and through the hourly WordPress scheduler while enabled. This contains the configured site key, site hostname, API/widget addresses, plugin component and version, but no visitor/form contents or secret key. Authentication uses a request signature. No report is sent while protection is disabled or paused.
+
+Form references: numeric provider form IDs are namespaced per installation. Core login, registration, WooCommerce registration and comments each have a site-wide reference. Elementor uses a resolved record's stored form_post_id and widget id; missing/invalid metadata remains unassigned rather than trusting POST fallbacks. For custom forms, pass a fixed server-side form_id key to formconfirmed_check(). Keep the formconfirmed_form_namespace option when migrating the site; uninstalling removes it and a later reinstall creates new references. No titles, visitor content or namespace seed are sent as form references.
+
+Technical report status is stored locally without response text, keys or hostnames. Failed deliveries retain the last accepted time and schedule a retry after 5, 10, 20, 40 and at most 60 minutes. Requests are at least 30 seconds apart. Manual retries require manage_options, POST and the action nonce. WP-Cron requires site visits (or a separately configured system cron).
+
 == Changelog ==
+
+= 1.6.0 =
+* Stable opaque form references connect individual forms to the account statistics. IDs come from server-selected form objects, never visitor fields; names and keys can change without changing the ID.
+* The plugin overview shows the last technical report attempt and last accepted report. An explicit protected POST action sends a report now, with a minimum interval and bounded scheduled retries.
+* Late WP-Cron delivery is explained separately from form-protection availability.
+
+= 1.5.0 =
+* Sends an authenticated technical integration report with plugin version and server receipt time. Reports are plugin assertions, not independent verification of installed files.
+
+= 1.4.0 =
+* Explicit Not spam / Spam feedback for held messages with an original check ID.
+* Bind feedback to the configured site and keep delivery separate from rating.
+* Reject unsafe feedback requests and suppress duplicate feedback counts.
+
+= 1.3.0 =
+* Browse all held messages with pagination, UTC date, form and status filters.
+* Configure safe field roles from server-owned form definitions in the admin.
+* Correct name-check examples and data-transmission information.
+
+= 1.2.0 =
+* Serialize held-message delivery and prevent repeated or ambiguous resend attempts.
+* Map contact field roles from server-owned definitions; exclude hidden, file and password fields.
+
+= 1.1.1 =
+* Send registration usernames and comment authors for the optional name check.
+* Serialize held-message admission and bound field count, entry size and total stored entries.
 
 = 1.1.0 =
 * Connect directly with your formconfirmed account using an expiring request and a server-side verifier.
 * Clearer information about temporary message processing.
-
 
 = 1.0.0 =
 * Contact Form 7, WPForms, Gravity Forms, Elementor Pro, Fluent Forms, Formidable, comments, registration (WordPress, WooCommerce) and login (optional).
@@ -116,6 +174,24 @@ Yes. Add the staging host to the protected site in your account, or define `FORM
 * Takes over the settings of the formexposed form protection tab.
 
 == Upgrade Notice ==
+
+= 1.6.0 =
+Adds stable form references for the account statistics and shows the delivery of the technical report. Keep the formconfirmed_form_namespace option when you move the site.
+
+= 1.5.0 =
+Sends a small signed technical report (plugin version, site key and hostname, no visitor data) so your account can show the integration status.
+
+= 1.4.0 =
+Adds explicit held-message feedback without transmitting message fields. Existing messages without check IDs remain readable and deliverable.
+
+= 1.3.0 =
+Adds held-message filters and per-form field mapping. Sensitive field types remain excluded.
+
+= 1.2.0 =
+Prevents duplicate held-message delivery and improves typed contact field selection.
+
+= 1.1.1 =
+Adds registration name checks and bounded, serialized held-message storage.
 
 = 1.1.0 =
 Adds direct account approval for securely connecting WordPress.

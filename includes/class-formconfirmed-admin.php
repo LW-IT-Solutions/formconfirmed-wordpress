@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Formconfirmed_Admin {
 
 	const PAGE = 'formconfirmed';
-	const TABS = array( 'overview', 'forms', 'settings', 'held', 'developers' );
+	const TABS = array( 'overview', 'forms', 'settings', 'held', 'fields', 'developers' );
 
 	public static function init() {
 		if ( ! is_admin() ) {
@@ -25,7 +25,9 @@ class Formconfirmed_Admin {
 		add_action( 'admin_notices', array( __CLASS__, 'notice' ) );
 		add_action( 'admin_post_formconfirmed_save', array( __CLASS__, 'action_save' ) );
 		add_action( 'admin_post_formconfirmed_save_forms', array( __CLASS__, 'action_save_forms' ) );
+		add_action( 'admin_post_formconfirmed_save_fields', array( __CLASS__, 'action_save_fields' ) );
 		add_action( 'admin_post_formconfirmed_test', array( __CLASS__, 'action_test' ) );
+		add_action( 'admin_post_formconfirmed_report', array( __CLASS__, 'action_report' ) );
 		add_action( 'admin_post_formconfirmed_connect', array( __CLASS__, 'action_connect' ) );
 		add_action( 'admin_post_formconfirmed_dismiss', array( __CLASS__, 'action_dismiss' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( FORMCONFIRMED_FILE ), array( __CLASS__, 'links' ) );
@@ -154,6 +156,7 @@ class Formconfirmed_Admin {
 			'forms'      => __( 'Forms', 'formconfirmed' ),
 			'settings'   => __( 'Settings', 'formconfirmed' ),
 			'held'       => __( 'Held messages', 'formconfirmed' ),
+			'fields' => __( 'Field mapping', 'formconfirmed' ),
 			'developers' => __( 'Developers', 'formconfirmed' ),
 		);
 		?>
@@ -183,6 +186,9 @@ class Formconfirmed_Admin {
 				case 'held':
 					self::page_held();
 					break;
+				case 'fields':
+					self::page_fields();
+					break;
 				case 'developers':
 					self::page_developers();
 					break;
@@ -203,6 +209,76 @@ class Formconfirmed_Admin {
 			'on'      => __( 'Active', 'formconfirmed' ),
 		);
 		return '<span class="fc-badge fc-badge-' . esc_attr( $state ) . '">' . esc_html( $t[ $state ] ) . '</span>';
+	}
+
+
+	/** True for a POST request; the method is read, unslashed and sanitized. */
+	public static function is_post() {
+		return isset( $_SERVER['REQUEST_METHOD'] ) && 'POST' === sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ) );
+	}
+
+	/** Read-only screen filter from the query string. It changes nothing, so it needs no nonce. */
+	private static function query_arg( $key ) {
+		$value = filter_input( INPUT_GET, $key, FILTER_UNSAFE_RAW );
+		return is_string( $value ) ? sanitize_text_field( $value ) : '';
+	}
+
+	public static function action_report() {
+		if ( ! self::is_post() || ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Not allowed.', 'formconfirmed' ) );
+		}
+		check_admin_referer( 'formconfirmed_report' );
+		$before = Formconfirmed_Core::report_status();
+		$ok = Formconfirmed_Core::report_integration( true );
+		$after = Formconfirmed_Core::report_status();
+		$msg = $ok ? array( 'ok', __( 'The technical report was accepted by the service.', 'formconfirmed' ) )
+			: array( 'warning', $after['attempt']===$before['attempt']
+				? __( 'No new report was sent. Check that protection is active and wait at least 30 seconds between attempts.', 'formconfirmed' )
+				: __( 'The report was not accepted. A retry is scheduled; the last successful delivery remains visible below.', 'formconfirmed' ) );
+		set_transient( 'formconfirmed_msg', $msg, 120 );
+		wp_safe_redirect( self::url() . '#fc-report-status' );
+		exit;
+	}
+
+	private static function report_panel() {
+		$s = Formconfirmed_Core::report_status();
+		$format = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
+		?>
+		<section class="fc-card" id="fc-report-status" aria-labelledby="fc-report-title">
+			<h2 id="fc-report-title"><?php esc_html_e( 'Technical report delivery', 'formconfirmed' ); ?></h2>
+			<dl>
+			<?php foreach ( array( 'attempt'=>__( 'Last attempt', 'formconfirmed' ), 'success'=>__( 'Last accepted report', 'formconfirmed' ) ) as $key=>$label ) : ?>
+				<dt><strong><?php echo esc_html( $label ); ?></strong></dt>
+				<dd><?php echo esc_html( $s[$key] ? wp_date( $format, $s[$key] ) : __( 'Not yet', 'formconfirmed' ) ); ?></dd>
+			<?php endforeach; ?>
+			</dl>
+			<?php if ( $s['attempt'] && ! $s['ok'] ) : ?>
+				<p><?php esc_html_e( 'The last delivery failed. Form submissions still use their own protection and outage rules.', 'formconfirmed' ); ?></p>
+			<?php elseif ( false === $s['checks_ok'] ) : ?>
+				<p><?php esc_html_e( 'The report arrived, but some integration checks need attention. See the integration diagnostics in your account.', 'formconfirmed' ); ?></p>
+			<?php endif; ?>
+			<?php if ( $s['next_retry'] ) : ?>
+				<p><?php echo esc_html( sprintf( /* translators: %s: date and time of the next attempt */ __( 'Next retry: %s.', 'formconfirmed' ), wp_date( $format, $s['next_retry'] ) ) ); ?></p>
+			<?php endif; ?>
+			<p class="description"><?php esc_html_e( 'WordPress runs scheduled reports when the site receives visits. With few visits or disabled WP-Cron, a report may be late; this alone does not prove that protection is unavailable.', 'formconfirmed' ); ?></p>
+			<?php if ( Formconfirmed_Core::on() && ! Formconfirmed_Core::paused() ) : ?>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'formconfirmed_report' ); ?>
+				<input type="hidden" name="action" value="formconfirmed_report">
+				<button class="button"><?php esc_html_e( 'Send report now', 'formconfirmed' ); ?></button>
+			</form>
+			<?php endif; ?>
+		</section>
+		<?php
+	}
+
+	private static function form_reference( $adapter, $id, $title ) {
+		$ref = Formconfirmed_Core::form_ref( $adapter, $id );
+		if ( '' === $ref ) { return; }
+		?>
+		<label class="screen-reader-text" for="fc-ref-<?php echo esc_attr( $adapter . '-' . $id ); ?>"><?php echo esc_html( sprintf( /* translators: %s: form title */ __( 'Dashboard form ID: %s', 'formconfirmed' ), $title ) ); ?></label>
+		<input class="large-text code" style="min-width:24em;max-width:100%" readonly dir="ltr" id="fc-ref-<?php echo esc_attr( $adapter . '-' . $id ); ?>" value="<?php echo esc_attr( $ref ); ?>">
+		<?php
 	}
 
 	private static function page_overview() {
@@ -263,6 +339,7 @@ class Formconfirmed_Admin {
 			<?php endif; ?>
 		</div>
 
+		<?php self::report_panel(); ?>
 		<?php if ( Formconfirmed_Core::on() ) : ?>
 		<h2 class="fc-h"><?php esc_html_e( 'Since activation', 'formconfirmed' ); ?></h2>
 		<div class="fc-tiles">
@@ -392,7 +469,7 @@ class Formconfirmed_Admin {
 							<p class="fc-muted"><?php esc_html_e( 'No forms yet.', 'formconfirmed' ); ?></p>
 						<?php else : ?>
 							<table class="widefat striped fc-forms">
-								<thead><tr><th scope="col"><?php esc_html_e( 'Protected', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Form', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'ID', 'formconfirmed' ); ?></th></tr></thead>
+								<thead><tr><th scope="col"><?php esc_html_e( 'Protected', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Form', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'ID', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Dashboard form ID', 'formconfirmed' ); ?></th></tr></thead>
 								<tbody>
 								<?php foreach ( $forms as $id => $title ) : ?>
 									<tr>
@@ -407,11 +484,14 @@ class Formconfirmed_Admin {
 											<?php endif; ?>
 										</td>
 										<td><code><?php echo esc_html( $id ); ?></code></td>
+										<td><?php self::form_reference( $a, $id, $title ); ?></td>
 									</tr>
 								<?php endforeach; ?>
 								</tbody>
 							</table>
 						<?php endif; ?>
+					<?php elseif ( $avail && in_array( $a, array( 'comments','register','woo_register','login' ), true ) ) : ?>
+						<p><?php esc_html_e( 'Dashboard form ID', 'formconfirmed' ); ?></p><?php self::form_reference( $a, 0, $labels[$a] ); ?>
 					<?php endif; ?>
 				</section>
 			<?php endforeach; ?>
@@ -463,8 +543,8 @@ class Formconfirmed_Admin {
 			<div class="fc-card">
 				<h2><?php esc_html_e( 'Checks', 'formconfirmed' ); ?></h2>
 				<div class="fc-row">
-					<?php self::toggle( 'content', $o['content'], __( 'Check the message text', 'formconfirmed' ), 'fc-content' ); ?>
-					<p class="description"><?php esc_html_e( 'Sends the message text along: spam filter in every plan, AI check where your plan includes it. Processed briefly on the service servers. AI checks use a temporary internal queue.', 'formconfirmed' ); ?></p>
+					<?php self::toggle( 'content', $o['content'], __( 'Check names and message text', 'formconfirmed' ), 'fc-content' ); ?>
+					<p class="description"><?php esc_html_e( 'Sends the mapped name and message text along: spam filter in every plan, AI check where your plan includes it. Processed briefly on the service servers. AI checks use a temporary internal queue.', 'formconfirmed' ); ?></p>
 				</div>
 				<div class="fc-row">
 					<?php self::toggle( 'backup', $o['backup'], __( 'Backup check on this site', 'formconfirmed' ), 'fc-backup' ); ?>
@@ -491,20 +571,45 @@ class Formconfirmed_Admin {
 		<?php
 	}
 
+	private static function cleanup_notice() {
+		$s = Formconfirmed_Held::maintenance_status();
+		echo '<div class="fc-card"><h2>' . esc_html__( 'Local quarantine cleanup', 'formconfirmed' ) . '</h2>';
+		if ( ! $s['available'] ) {
+			echo '<p>' . esc_html__( 'Cleanup status is unavailable. Check the local database.', 'formconfirmed' ) . '</p></div>';
+			return;
+		}
+		/* translators: 1: count of messages older than retention limit */
+		echo '<p>' . esc_html( sprintf( __( 'Messages older than 14 days: %1$d', 'formconfirmed' ), $s['overdue'] ) ) . '</p>';
+		$format = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
+		$last = $s['last_success'] ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $s['last_success'] ), $format ) : __( 'Not run yet', 'formconfirmed' );
+		$next = $s['next_run'] ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $s['next_run'] ), $format ) : __( 'Not scheduled', 'formconfirmed' );
+		/* translators: 1: local date/time or not run yet */
+		echo '<p>' . esc_html( sprintf( __( 'Last successful cleanup batch: %1$s', 'formconfirmed' ), $last ) ) . '</p>';
+		/* translators: 1: local date/time or not scheduled */
+		echo '<p>' . esc_html( sprintf( __( 'Next cleanup: %1$s', 'formconfirmed' ), $next ) ) . '</p>';
+		if ( $s['failed'] ) { echo '<p>' . esc_html__( 'Some entries could not be removed. A later batch will retry; check storage if this persists.', 'formconfirmed' ) . '</p>'; }
+		echo '<p class="description">' . esc_html__( 'Cleanup runs in batches of at most 100 messages. On low-traffic sites, configure a system scheduler for WordPress cron as described in the plugin readme.', 'formconfirmed' ) . '</p></div>';
+	}
+
 	private static function page_held() {
+		self::cleanup_notice();
 		if ( Formconfirmed_Held::external() ) {
 			echo '<div class="fc-card"><p>' . esc_html__( 'The formexposed plugin is active: held messages wait in its quarantine (Settings -> formexposed -> Quarantine), together with the messages its protection layer stopped.', 'formconfirmed' ) . '</p></div>';
 			return;
 		}
-		$rows = Formconfirmed_Held::entries( 100 );
+		$filters = Formconfirmed_Held::filters( array( 'status' => self::query_arg( 'held_status' ), 'form' => self::query_arg( 'held_form' ), 'after' => self::query_arg( 'held_after' ), 'before' => self::query_arg( 'held_before' ) ) );
+		$page = max( 1, absint( self::query_arg( 'held_page' ) ) );
+		$list = Formconfirmed_Held::listing( $filters, $page, 50 ); $rows = $list['rows'];
+		self::held_filters( $filters ); self::held_pagination( $list );
+		echo '<p class="description">' . esc_html__( 'Rate a message explicitly as Not spam or Spam. Only its opaque check ID and your rating are sent to the service. Sending or deleting a message does not rate it. Older messages without a check ID cannot be rated.', 'formconfirmed' ) . '</p>';
 		/* translators: 1: number of days, 2: e-mail address */
-		echo '<p class="fc-lead">' . esc_html( sprintf( __( 'Messages that were not passed wait here for %1$d days. "Deliver" sends one to %2$s.', 'formconfirmed' ), Formconfirmed_Held::DAYS, Formconfirmed_Held::recipient() ) ) . '</p>';
+		echo '<p class="fc-lead">' . esc_html( sprintf( __( 'Messages that were not passed wait here for %1$d days. "Send" passes one to the mailer for %2$s; this does not confirm delivery.', 'formconfirmed' ), Formconfirmed_Held::DAYS, Formconfirmed_Held::recipient() ) ) . '</p>';
 		if ( ! $rows ) {
 			echo '<div class="fc-card fc-empty"><p>' . esc_html__( 'No held messages.', 'formconfirmed' ) . '</p></div>';
 			return;
 		}
 		?>
-		<table class="widefat striped fc-held">
+		<div class="fc-table-scroll"><table class="widefat striped fc-held">
 			<thead><tr><th scope="col"><?php esc_html_e( 'Received', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Form', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Why', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Message', 'formconfirmed' ); ?></th><th scope="col"><span class="screen-reader-text"><?php esc_html_e( 'Actions', 'formconfirmed' ); ?></span></th></tr></thead>
 			<tbody>
 			<?php foreach ( $rows as $r ) : ?>
@@ -519,17 +624,87 @@ class Formconfirmed_Admin {
 					</td>
 					<td class="fc-nowrap">
 						<?php if ( $r['released'] ) : ?>
-							<span class="fc-badge fc-badge-on"><?php esc_html_e( 'Delivered', 'formconfirmed' ); ?></span>
+							<span class="fc-badge fc-badge-on"><?php esc_html_e( 'Passed to mailer', 'formconfirmed' ); ?></span>
+						<?php elseif ( ! empty( $r['release_state'] ) ) : ?>
+							<span class="fc-badge"><?php esc_html_e( 'Delivery pending or uncertain; check before resending.', 'formconfirmed' ); ?></span>
 						<?php else : ?>
-							<a class="button button-small button-primary" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=formconfirmed_release&id=' . $r['id'] ), 'formconfirmed_release' ) ); ?>"><?php esc_html_e( 'Deliver', 'formconfirmed' ); ?></a>
+							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+								<input type="hidden" name="action" value="formconfirmed_release">
+								<input type="hidden" name="id" value="<?php echo (int) $r['id']; ?>">
+								<?php wp_nonce_field( 'formconfirmed_release_' . $r['id'] ); ?>
+								<button class="button button-small button-primary" type="submit"><?php esc_html_e( 'Send', 'formconfirmed' ); ?></button>
+							</form>
+						<?php endif; ?>
+						<?php if ( ! empty( $r['feedback_available'] ) ) : ?>
+							<div class="fc-feedback" role="group" aria-label="<?php esc_attr_e( 'Rate this held message', 'formconfirmed' ); ?>">
+							<?php foreach ( array( 'ham' => __( 'Not spam', 'formconfirmed' ), 'spam' => __( 'Spam', 'formconfirmed' ) ) as $label => $text ) : ?>
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+									<input type="hidden" name="action" value="formconfirmed_feedback">
+									<input type="hidden" name="id" value="<?php echo (int) $r['id']; ?>">
+									<input type="hidden" name="label" value="<?php echo esc_attr( $label ); ?>">
+									<?php wp_nonce_field( 'formconfirmed_feedback_' . $r['id'] . '_' . $label ); ?>
+									<button type="submit" class="button button-small" <?php disabled( $r['feedback'], $label ); ?>><?php echo esc_html( $text ); ?><?php echo $r['feedback'] === $label ? ' ✓' : ''; ?></button>
+								</form>
+							<?php endforeach; ?>
+							</div>
 						<?php endif; ?>
 						<a class="button button-small button-link-delete" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=formconfirmed_delete&id=' . $r['id'] ), 'formconfirmed_delete' ) ); ?>"><?php esc_html_e( 'Delete', 'formconfirmed' ); ?></a>
 					</td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
-		</table>
+		</table></div>
+		<?php self::held_pagination( $list ); ?>
 		<?php
+	}
+
+	private static function held_filters( $f ) {
+		?><form method="get" action="<?php echo esc_url(admin_url('options-general.php')); ?>" class="fc-filter">
+		<input type="hidden" name="page" value="formconfirmed"><input type="hidden" name="tab" value="held">
+		<label><?php esc_html_e('Status','formconfirmed'); ?><select name="held_status"><?php foreach(array('all'=>__('All','formconfirmed'),'held'=>__('Waiting for review','formconfirmed'),'uncertain'=>__('Delivery uncertain','formconfirmed'),'sent'=>__('Passed to mailer','formconfirmed')) as $key=>$label): ?><option value="<?php echo esc_attr($key); ?>" <?php selected($f['status'],$key); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?></select></label>
+		<label><?php esc_html_e('Form name','formconfirmed'); ?><input type="search" name="held_form" value="<?php echo esc_attr($f['form']); ?>" maxlength="100"></label>
+		<label><?php esc_html_e('From (UTC)','formconfirmed'); ?><input type="date" name="held_after" value="<?php echo esc_attr($f['after']); ?>"></label>
+		<label><?php esc_html_e('Through (UTC)','formconfirmed'); ?><input type="date" name="held_before" value="<?php echo esc_attr($f['before']); ?>"></label>
+		<button class="button"><?php esc_html_e('Filter','formconfirmed'); ?></button><a class="button" href="<?php echo esc_url(self::url(array('tab'=>'held'))); ?>"><?php esc_html_e('Reset filters','formconfirmed'); ?></a></form><?php
+	}
+
+	private static function held_pagination( $list ) {
+		$f=$list['filters'];$args=array('tab'=>'held','held_status'=>$f['status'],'held_form'=>$f['form'],'held_after'=>$f['after'],'held_before'=>$f['before']);
+		echo '<nav class="fc-pagination" aria-label="'.esc_attr__('Held message pages','formconfirmed').'">';
+		echo '<span>'.esc_html(sprintf(/* translators: 1: current page, 2: number of pages, 3: number of messages */ __('Page %1$d of %2$d — %3$d messages','formconfirmed'),$list['page'],$list['pages'],$list['total'])).'</span> ';
+		if($list['page']>1)echo '<a class="button" rel="prev" href="'.esc_url(self::url(array_merge($args,array('held_page'=>$list['page']-1)))).'">'.esc_html__('Previous','formconfirmed').'</a> ';
+		if($list['page']<$list['pages'])echo '<a class="button" rel="next" href="'.esc_url(self::url(array_merge($args,array('held_page'=>$list['page']+1)))).'">'.esc_html__('Next','formconfirmed').'</a>';
+		echo '</nav>';
+	}
+
+	private static function page_fields() {
+		$choices=array();$labels=Formconfirmed_Core::labels();
+		foreach(Formconfirmed_Core::PER_FORM as $adapter)foreach(Formconfirmed_Core::forms_of($adapter) as $id=>$title)$choices[$adapter.':'.$id]=$labels[$adapter].' — '.$title;
+		$pick=self::query_arg('mapping');
+		if(!isset($choices[$pick]))$pick=$choices?array_key_first($choices):'';
+		?><p class="fc-lead"><?php esc_html_e('Choose which fields supply the name, email and message. Only saved form definitions are shown; no visitor values are loaded. Automatic uses the detected field type and identifier.','formconfirmed'); ?></p>
+		<form method="get" action="<?php echo esc_url(admin_url('options-general.php')); ?>" class="fc-filter"><input type="hidden" name="page" value="formconfirmed"><input type="hidden" name="tab" value="fields"><label><?php esc_html_e('Form','formconfirmed'); ?><select name="mapping"><?php foreach($choices as $value=>$label): ?><option value="<?php echo esc_attr($value); ?>" <?php selected($value,$pick); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?></select></label><button class="button"><?php esc_html_e('Show fields','formconfirmed'); ?></button></form>
+		<p class="description"><?php esc_html_e('Hidden fields, passwords, uploads, sensitive identifiers and unknown field types stay excluded. Elementor uses its server-owned record definitions and the developer filter; this form selector covers the five plugins with a form catalogue.','formconfirmed'); ?></p><?php
+		if(!$pick){echo '<p>'.esc_html__('No supported forms found.','formconfirmed').'</p>';return;}
+		list($adapter,$id)=explode(':',$pick,2);$defs=Formconfirmed_Fields::definitions($adapter,(int)$id);$saved=Formconfirmed_Fields::saved_roles($adapter,(int)$id);
+		?><form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+		<input type="hidden" name="action" value="formconfirmed_save_fields"><input type="hidden" name="adapter" value="<?php echo esc_attr($adapter); ?>"><input type="hidden" name="form_id" value="<?php echo (int)$id; ?>"><?php wp_nonce_field('formconfirmed_fields_'.$adapter.'_'.$id); ?>
+		<div class="fc-table-scroll"><table class="widefat striped"><thead><tr><th scope="col"><?php esc_html_e('Field','formconfirmed'); ?></th><th scope="col"><?php esc_html_e('Type','formconfirmed'); ?></th><th scope="col"><?php esc_html_e('Use as','formconfirmed'); ?></th><th scope="col"><?php esc_html_e('Detected use','formconfirmed'); ?></th></tr></thead><tbody>
+		<?php foreach($defs as $field):$fid=(string)$field['id'];$allowed=Formconfirmed_Fields::eligible($field);$probe=$field;$probe['value']='preview@example.invalid';$mapped=Formconfirmed_Fields::map(array($probe),$adapter,(int)$id);$detected=$mapped['name']!==''?__('Name','formconfirmed'):($mapped['content']!==''?__('Message','formconfirmed'):($mapped['email']!==''?__('Email','formconfirmed'):__('Not sent for the text check','formconfirmed'))); ?>
+		<tr><th scope="row"><?php echo esc_html($field['label']??$fid); ?><br><code><?php echo esc_html($fid); ?></code></th><td><?php echo esc_html($field['type']); ?></td><td><?php if($allowed): ?><select aria-label="<?php echo esc_attr(sprintf(/* translators: %s: field label */ __('Role for %s','formconfirmed'),$field['label']??$fid)); ?>" name="roles[<?php echo esc_attr($fid); ?>]"><?php foreach(array('auto'=>__('Automatic','formconfirmed'),'name'=>__('Name','formconfirmed'),'email'=>__('Email','formconfirmed'),'content'=>__('Message','formconfirmed'),'ignore'=>__('Ignore','formconfirmed')) as $role=>$label): ?><option value="<?php echo esc_attr($role); ?>" <?php selected($saved[$fid]??'auto',$role); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?></select><?php else:esc_html_e('Excluded','formconfirmed');endif; ?></td><td><?php echo esc_html($allowed?$detected:__('Excluded','formconfirmed')); ?></td></tr><?php endforeach; ?>
+		</tbody></table></div><?php submit_button(__('Save field mapping','formconfirmed')); ?></form><?php
+	}
+
+	public static function action_save_fields() {
+		if(!current_user_can('manage_options'))wp_die(esc_html__('Not allowed.','formconfirmed'));
+		if(!self::is_post())wp_die(esc_html__('Use the save button.','formconfirmed'));
+		$adapter=isset($_POST['adapter'])&&is_string($_POST['adapter'])?sanitize_key(wp_unslash($_POST['adapter'])):'';
+		$id=isset($_POST['form_id'])&&is_scalar($_POST['form_id'])?absint($_POST['form_id']):0;
+		check_admin_referer('formconfirmed_fields_'.$adapter.'_'.$id);
+		$posted=isset($_POST['roles'])&&is_array($_POST['roles'])?map_deep(wp_unslash($_POST['roles']),'sanitize_text_field'):array();
+		$ok=Formconfirmed_Fields::save_roles($adapter,$id,$posted);
+		set_transient('formconfirmed_msg',array($ok?'ok':'error',$ok?__('Field mapping saved. Clear the page cache if your form changed.','formconfirmed'):__('The form could not be found. No mapping was saved.','formconfirmed')),120);
+		wp_safe_redirect(self::url(array('tab'=>'fields','mapping'=>$adapter.':'.$id)));exit;
 	}
 
 	private static function page_developers() {
@@ -541,6 +716,7 @@ class Formconfirmed_Admin {
 			. "    'purpose' => 'contact',\n"
 			. "    'content' => \$message,            // optional, for the content check\n"
 			. "    'email'   => \$email,              // optional\n"
+			. "    'name'    => \$name,               // optional, for the name check\n"
 			. "    'form'    => 'Callback form',      // optional: keep a copy when not passed ...\n"
 			. "    'fields'  => array( array( 'Name', \$name ), array( 'Message', \$message ) ), // ... with these fields\n"
 			. ") );\n"
@@ -574,6 +750,7 @@ class Formconfirmed_Admin {
 			<h2><?php esc_html_e( 'Filters and constants', 'formconfirmed' ); ?></h2>
 			<table class="widefat striped">
 				<tbody>
+					<tr><td><code>formconfirmed_field_roles</code></td><td><?php esc_html_e( 'Override field roles by stable field ID: name, email, content or ignore. Arguments: roles, adapter and form ID. Excluded field types stay excluded.', 'formconfirmed' ); ?></td></tr>
 					<tr><td><code>formconfirmed_client_ip</code></td><td><?php esc_html_e( 'The visitor\'s IP address, for sites behind a proxy or CDN.', 'formconfirmed' ); ?></td></tr>
 					<tr><td><code>formconfirmed_held_recipient</code></td><td><?php esc_html_e( 'Where delivered held messages go (default: the site\'s e-mail address).', 'formconfirmed' ); ?></td></tr>
 					<tr><td><code>formconfirmed_pow_max</code></td><td><?php esc_html_e( 'Difficulty of the proof of work of the backup check (default 50,000).', 'formconfirmed' ); ?></td></tr>
@@ -652,7 +829,7 @@ class Formconfirmed_Admin {
 		$h = wp_remote_get( FORMCONFIRMED_API . '/health', array( 'timeout' => Formconfirmed_Core::TIMEOUT ) );
 		if ( is_wp_error( $h ) || 200 !== (int) wp_remote_retrieve_response_code( $h ) ) {
 			/* translators: %s: error message or HTTP status */
-			$msg = array( 'error', sprintf( __( 'The service did not answer (%s). Until it does, messages are delivered only if the backup check passed; otherwise they are held or refused.', 'formconfirmed' ), is_wp_error( $h ) ? $h->get_error_message() : 'HTTP ' . (int) wp_remote_retrieve_response_code( $h ) ) );
+			$msg = array( 'error', sprintf( __( 'The service did not answer (%s). Until it does, messages are delivered only if the backup check passed; otherwise they are held or refused.', 'formconfirmed' ), is_wp_error( $h ) ? __( 'network error', 'formconfirmed' ) : 'HTTP ' . (int) wp_remote_retrieve_response_code( $h ) ) );
 		} else {
 			$r     = wp_remote_post( FORMCONFIRMED_API . '/verify', array(
 				'timeout' => Formconfirmed_Core::TIMEOUT,
@@ -664,6 +841,7 @@ class Formconfirmed_Admin {
 				$o          = Formconfirmed_Core::opt();
 				$o['ok_at'] = time();
 				Formconfirmed_Core::save_opt( $o );
+				Formconfirmed_Core::report_integration();
 				$msg = array( 'ok', __( 'Connected: the service answers and accepts the secret key.', 'formconfirmed' ) );
 			} elseif ( $codes ) {
 				$msg = array( 'error', self::problem_text( implode( ',', $codes ) ) );
@@ -674,7 +852,7 @@ class Formconfirmed_Admin {
 		if ( Formconfirmed_Backup::own() ) {
 			$t = Formconfirmed_Backup::self_test();
 			if ( is_wp_error( $t ) ) {
-				$msg = array( 'ok' === $msg[0] ? 'warning' : 'error', $msg[1] . ' ' . $t->get_error_message() );
+				$msg = array( 'ok' === $msg[0] ? 'warning' : 'error', $msg[1] . ' ' . __( 'The backup self-test failed.', 'formconfirmed' ) );
 			} else {
 				$msg[1] .= ' ' . __( 'Backup check: self-test passed.', 'formconfirmed' );
 			}
@@ -722,7 +900,7 @@ class Formconfirmed_Admin {
 		if ( ! function_exists( 'wp_add_privacy_policy_content' ) ) {
 			return;
 		}
-		$text = __( 'Our forms are protected by formconfirmed, a service of LW IT Solutions with servers in the EU. On pages with a protected form your browser loads a script of the service and solves a small calculation task; no cookies are set and nothing is stored on your device. When you send the form, this website sends the result, your IP address, the e-mail address entered in the form and - if enabled - the message text to the service, which checks them for spam and returns a decision. The message text is processed briefly on the service servers. AI checks use a temporary internal queue. The IP address is only kept shortened and hashed. If the check cannot be completed, your message is delivered only after an independent check on this website; otherwise it is held for review or refused, not delivered unchecked. Messages that are not passed are kept on this website for 14 days so they can be reviewed.', 'formconfirmed' );
+		$text = __( 'Our forms are protected by formconfirmed, a service of LW IT Solutions with servers in the EU. On pages with a protected form your browser loads a script of the service and solves a small calculation task; no cookies are set and nothing is stored on your device. When you send the form, this website sends the result, your IP address, the e-mail address entered in the form and - if enabled - the mapped contact name, registration name or comment author and the message text to the service, which checks them for spam and returns a decision. The message text is processed briefly on the service servers. AI checks use a temporary internal queue. The IP address is only kept shortened and hashed. If the check cannot be completed, your message is delivered only after an independent check on this website; otherwise it is held for review or refused, not delivered unchecked. Messages that are not passed are kept on this website for 14 days so they can be reviewed.', 'formconfirmed' );
 		wp_add_privacy_policy_content( 'formconfirmed', wpautop( esc_html( $text ) ) );
 	}
 }

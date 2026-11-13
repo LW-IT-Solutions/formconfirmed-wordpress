@@ -9,9 +9,12 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 }
 
 delete_option( 'formconfirmed_settings' );
+delete_option( 'formconfirmed_field_roles' );
+delete_option( 'formconfirmed_purge_status' );
 delete_option( 'formconfirmed_notice_off' );
 delete_transient( 'formconfirmed_msg' );
 wp_clear_scheduled_hook( 'formconfirmed_purge' );
+wp_clear_scheduled_hook( 'formconfirmed_purge_followup' );
 
 do {
 	$formconfirmed_ids = get_posts( array(
@@ -25,3 +28,15 @@ do {
 		wp_delete_post( (int) $formconfirmed_id, true );
 	}
 } while ( $formconfirmed_ids );
+
+wp_clear_scheduled_hook( 'formconfirmed_integration_report' );
+delete_transient( 'formconfirmed_report_status' );
+
+wp_clear_scheduled_hook( 'formconfirmed_integration_retry' );
+delete_option( 'formconfirmed_form_namespace' );
+delete_option( 'formconfirmed_report_status' );
+
+// Pending account connection requests (ten minutes, one per administrator).
+foreach ( get_users( array( 'capability' => 'manage_options', 'fields' => 'ID' ) ) as $formconfirmed_user ) {
+	delete_transient( 'formconfirmed_connect_' . (int) $formconfirmed_user );
+}

@@ -2,6 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
+require_once __DIR__ . '/class-formconfirmed-fields.php';
 /**
  * formconfirmed - the check of every protected form.
  *
@@ -9,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * solves a small proof of work in the visitor's browser and puts a token into the form. On
  * submission this server sends the token to FORMCONFIRMED_API/verify together with the secret key,
  * the visitor's IP address, the trap field, the first e-mail address of the form and - only if
- * switched on - the message text. The service answers allow, flag or block.
+ * switched on - the message text and the registration username or comment author (up to 200 characters). The service answers allow, flag or block.
  *
  * Outcome of a submission (the outage rule of the service):
  *   allow            the message goes through.
@@ -79,16 +80,121 @@ class Formconfirmed_Core {
 	private static $wpforms_entry = array();
 
 	public static function init() {
+		add_action( 'formconfirmed_integration_report', array( __CLASS__, 'report_integration' ) );
+		add_action( 'formconfirmed_integration_retry', array( __CLASS__, 'report_integration' ) );
 		add_shortcode( 'formconfirmed', array( __CLASS__, 'shortcode' ) );
 		if ( ! self::on() || self::paused() ) {
 			return;
 		}
+		if ( ! wp_next_scheduled( 'formconfirmed_integration_report' ) ) { wp_schedule_event( time() + 60, 'hourly', 'formconfirmed_integration_report' ); }
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'register_script' ) );
 		add_action( 'login_enqueue_scripts', array( __CLASS__, 'register_script' ) );
 		add_filter( 'script_loader_tag', array( __CLASS__, 'async_tag' ), 10, 2 );
 		foreach ( self::active_adapters() as $a ) {
 			call_user_func( array( __CLASS__, 'adapter_' . $a ) );
 		}
+	}
+
+
+
+	/** Opaque per-installation references, derived only from server-selected adapter/form keys. */
+	const FORM_NAMESPACE = 'formconfirmed_form_namespace';
+	public static function form_ref( $adapter, $form_id = 0 ) {
+		if ( ! is_string( $adapter ) || ! in_array( $adapter, array_merge( self::ADAPTERS, array( 'custom' ) ), true ) ) { return ''; }
+		if ( in_array( $adapter, self::PER_FORM, true ) ) {
+			if ( ! ( is_int( $form_id ) || is_string( $form_id ) ) || ! preg_match( '/^[1-9][0-9]{0,17}$/D', (string) $form_id ) ) { return ''; }
+			$key = (string) $form_id;
+		} elseif ( 'elementor' === $adapter ) {
+			if ( ! is_string( $form_id ) || ! preg_match( '/^[1-9][0-9]{0,17}:[a-f0-9]{6,32}$/D', $form_id ) ) { return ''; }
+			$key = $form_id;
+		} elseif ( 'custom' === $adapter ) {
+			if ( ! is_string( $form_id ) || ! preg_match( '/^[a-zA-Z0-9_-]{1,80}$/D', $form_id ) ) { return ''; }
+			$key = $form_id;
+		} else {
+			$key = 'site';
+		}
+		$seed = get_option( self::FORM_NAMESPACE, null );
+		if ( null === $seed ) {
+			try { $new = bin2hex( random_bytes( 32 ) ); } catch ( Exception $e ) { return ''; }
+			$seed = add_option( self::FORM_NAMESPACE, $new, '', false ) ? $new : get_option( self::FORM_NAMESPACE, '' );
+		}
+		if ( ! is_string( $seed ) || ! preg_match( '/^[a-f0-9]{64}$/D', $seed ) ) { return ''; }
+		return 'fcf_' . substr( hash_hmac( 'sha256', "fc-form-v1\n" . $adapter . "\n" . $key, $seed ), 0, 32 );
+	}
+
+	/** Only a resolved Elementor record supplies the post and widget identity. No POST fallback. */
+	public static function elementor_form_key( $record ) {
+		if ( ! is_object( $record ) || ! method_exists( $record, 'get_form_settings' ) ) { return ''; }
+		$post = $record->get_form_settings( 'form_post_id' );
+		$id = $record->get_form_settings( 'id' );
+		if ( ! ( is_int( $post ) || is_string( $post ) ) || ! preg_match( '/^[1-9][0-9]{0,17}$/D', (string) $post )
+			|| ! is_string( $id ) || ! preg_match( '/^[a-f0-9]{6,32}$/D', $id ) ) { return ''; }
+		return (string) $post . ':' . $id;
+	}
+
+	/** Persist only bounded technical delivery status; never response text, keys or hostnames. */
+	public static function report_status() {
+		$raw = get_option( 'formconfirmed_report_status', array() );
+		if ( ! is_array( $raw ) || ! isset( $raw['attempt'] ) ) { $raw = get_transient( 'formconfirmed_report_status' ); }
+		$raw = is_array( $raw ) ? $raw : array();
+		$out = array( 'attempt'=>0, 'success'=>0, 'next_retry'=>0, 'failures'=>0, 'ok'=>false, 'checks_ok'=>null );
+		foreach ( array( 'attempt', 'success', 'next_retry' ) as $k ) {
+			if ( isset( $raw[$k] ) && is_int( $raw[$k] ) && $raw[$k]>=0 && $raw[$k]<=time()+3600 ) { $out[$k]=$raw[$k]; }
+		}
+		// Upgrade the former two-hour transient without inventing a successful delivery.
+		if ( ! $out['attempt'] && isset( $raw['at'] ) && is_int( $raw['at'] ) && $raw['at']>0 && $raw['at']<=time()+60 ) {
+			$out['attempt']=$raw['at'];
+			if ( true === ( $raw['ok'] ?? null ) ) { $out['success']=$raw['at']; }
+		}
+		$out['ok'] = true === ( $raw['ok'] ?? null );
+		$out['failures'] = isset( $raw['failures'] ) && is_int( $raw['failures'] ) ? max(0,min(12,$raw['failures'])) : 0;
+		$out['checks_ok'] = isset( $raw['checks_ok'] ) && is_bool( $raw['checks_ok'] ) ? $raw['checks_ok'] : null;
+		return $out;
+	}
+
+
+	/** Small authenticated technical report. This is a plugin assertion, not binary attestation. */
+	public static function report_integration( $manual = false ) {
+		if ( ! self::on() || self::paused() ) { return false; }
+		$state = self::report_status(); $now = time();
+		if ( $state['attempt'] && $now < $state['attempt']+30 ) { return false; }
+		if ( ! $manual && $state['next_retry']>$now ) { return false; }
+		$o = self::opt();
+		$host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+		if ( '' === $host ) { return false; }
+		$base = rtrim( FORMCONFIRMED_API, '/' );
+		$url = $base . '/integration';
+		$parts = wp_parse_url( $url );
+		if ( ! is_array( $parts ) || ! empty( $parts['query'] ) || ! empty( $parts['fragment'] ) || ! empty( $parts['user'] ) || ! empty( $parts['pass'] ) ) { return false; }
+		try { $nonce = bin2hex( random_bytes( 16 ) ); } catch ( Exception $e ) { return false; }
+		$ts = (string) $now;
+		$raw = wp_json_encode( array( 'hostname'=>$host, 'api'=>$base, 'widget'=>$base.'/widget.js', 'sitekey'=>$o['site_key'], 'component'=>'wordpress-plugin', 'plugin_version'=>FORMCONFIRMED_VERSION ) );
+		$message = "fc-ops-v1\nPOST\n" . $parts['path'] . "\n" . $ts . "\n" . $nonce . "\n" . hash( 'sha256', $raw );
+		$r = wp_remote_post( $url, array(
+			'timeout'=>self::TIMEOUT, 'redirection'=>0, 'limit_response_size'=>16384,
+			'headers'=>array( 'Content-Type'=>'application/json', 'X-FC-Key'=>$o['site_key'], 'X-FC-Time'=>$ts, 'X-FC-Nonce'=>$nonce, 'X-FC-Signature'=>hash_hmac( 'sha256', $message, hash( 'sha256', $o['secret'] ) ) ),
+			'body'=>$raw,
+		) );
+		$j = is_wp_error( $r ) ? null : json_decode( (string) wp_remote_retrieve_body( $r ), true );
+		$ok = ! is_wp_error( $r ) && 200 === (int) wp_remote_retrieve_response_code( $r ) && is_array( $j ) && true === ( $j['success'] ?? null );
+		$fields = array( 'api_matches', 'widget_matches', 'key_matches', 'secret_valid', 'host_allowed' );
+		$ok = $ok && isset( $j['checks'] ) && is_array( $j['checks'] ) && count( $j['checks'] ) === count( $fields );
+		foreach ( $fields as $field ) { if ( ! isset( $j['checks'][$field] ) || ! is_bool( $j['checks'][$field] ) ) { $ok=false; } }
+		$state['attempt']=$now; $state['ok']=$ok;
+		$state['checks_ok']=$ok ? ! in_array( false, $j['checks'], true ) : null;
+		$state['failures']=$ok ? 0 : min(12,$state['failures']+1);
+		$state['next_retry']=$ok ? 0 : $now+(int)min(3600,300*pow(2,min(4,$state['failures']-1)));
+		if ( $ok ) { $state['success']=$now; }
+		update_option( 'formconfirmed_report_status', $state, false );
+		delete_transient( 'formconfirmed_report_status' );
+		wp_clear_scheduled_hook( 'formconfirmed_integration_retry' );
+		if ( ! $ok ) { wp_schedule_single_event( $state['next_retry'], 'formconfirmed_integration_retry' ); }
+		return $ok;
+	}
+	public static function stop_reporting() {
+		wp_clear_scheduled_hook( 'formconfirmed_integration_report' );
+		wp_clear_scheduled_hook( 'formconfirmed_integration_retry' );
+		delete_transient( 'formconfirmed_report_status' );
 	}
 
 	/** First activation: take over the keys of the form protection tab of the formexposed plugin. */
@@ -357,20 +463,22 @@ class Formconfirmed_Core {
 	 * Checks a submission of a form of your own (formconfirmed_check()). $args:
 	 *   purpose  the purpose of the widget in that form (default contact)
 	 *   content  the message text, for the content check (optional)
+	 *   name     the contact/registration name or comment author (optional, at most 200 characters)
 	 *   email    the e-mail address of the form (optional)
 	 *   data     where the token is (default: the POST request)
+	 *   form_id  fixed server-side key for a custom form; never copy it from visitor input
 	 *   form     a name for held copies, fields: list of array(label, value) - when given, a message
 	 *            that is not passed is kept under Held messages
 	 * Returns array(pass, decision pass|hold|reject, action, reasons, message).
 	 */
 	public static function check( $args = array() ) {
-		$args    = wp_parse_args( (array) $args, array( 'purpose' => 'contact', 'content' => '', 'email' => '', 'data' => null, 'form' => '', 'fields' => array() ) );
+		$args    = wp_parse_args( (array) $args, array( 'purpose' => 'contact', 'content' => '', 'email' => '', 'name' => '', 'data' => null, 'form_id' => '', 'form' => '', 'fields' => array() ) );
 		$purpose = self::clean_purpose( $args['purpose'] );
 		$adapter = 'login' === $purpose ? 'login' : 'custom';
 		if ( ! self::on() ) {
 			$res = array( 'action' => 'none', 'score' => null, 'reasons' => array(), 'unavailable' => true, 'codes' => array( 'not-configured' ) );
 		} else {
-			$res = self::verify( $adapter, is_array( $args['data'] ) ? $args['data'] : null, (string) $args['content'], (string) $args['email'], $purpose );
+			$res = self::verify( $adapter, is_array( $args['data'] ) ? $args['data'] : null, (string) $args['content'], (string) $args['email'], $purpose, is_string( $args['name'] ) ? $args['name'] : '', is_string( $args['form_id'] ) ? $args['form_id'] : '' );
 		}
 		if ( is_array( $args['data'] ) ) {
 			Formconfirmed_Backup::use_data( $args['data'] );
@@ -378,6 +486,7 @@ class Formconfirmed_Core {
 		$d = self::decide( $res, $adapter );
 		if ( 'pass' !== $d && '' !== (string) $args['form'] && $args['fields'] ) {
 			self::keep( 'custom', (string) $args['form'], (array) $args['fields'] );
+			$d = self::$decision;
 		}
 		return array(
 			'pass'     => 'pass' === $d,
@@ -415,11 +524,14 @@ class Formconfirmed_Core {
 	 * $email:   the e-mail address of the form (disposable providers, domains without mail).
 	 * Returns array(action, score, reasons, unavailable, codes).
 	 */
-	public static function verify( $adapter, $data = null, $content = '', $email = '', $purpose = '' ) {
-		if ( null !== self::$result && self::$checked === $adapter ) {
+	public static function verify( $adapter, $data = null, $content = '', $email = '', $purpose = '', $name = '', $form_id = 0 ) {
+		$ref = self::form_ref( $adapter, $form_id );
+		$context = $adapter . ':' . $ref;
+		if ( null !== self::$result && self::$checked === $context ) {
 			return self::$result;   // some form plugins run their validation filter twice; a token is valid once
 		}
-		self::$checked = $adapter;
+		self::$checked = $context;
+		self::$decision = null;
 		$o     = self::opt();
 		$token = is_array( $data ) ? ( isset( $data[ self::FIELD ] ) && is_string( $data[ self::FIELD ] ) ? $data[ self::FIELD ] : '' ) : self::posted( self::FIELD );
 		$hp    = is_array( $data ) ? ( isset( $data[ self::HP ] ) && is_string( $data[ self::HP ] ) ? $data[ self::HP ] : '' ) : self::posted( self::HP );
@@ -431,12 +543,16 @@ class Formconfirmed_Core {
 			'expected_purpose' => '' !== $purpose ? $purpose : self::PURPOSES[ $adapter ],
 			'form_mode'        => 'interactive',
 		);
+		if ( '' !== $ref ) { $body['expected_form_id']=$ref; }
 		$email = sanitize_email( (string) $email );
 		if ( '' !== $email && is_email( $email ) ) {
 			$body['email'] = $email;
 		}
 		if ( $o['content'] && 'login' !== $adapter && '' !== trim( (string) $content ) ) {
 			$body['content'] = mb_substr( (string) $content, 0, 2000 );
+		}
+		if ( $o['content'] && 'login' !== $adapter && is_string( $name ) && '' !== trim( $name ) ) {
+			$body['name'] = mb_substr( sanitize_text_field( $name ), 0, 200 );
 		}
 		$r = wp_remote_post( FORMCONFIRMED_API . '/verify', array(
 			'timeout' => self::TIMEOUT,
@@ -487,6 +603,7 @@ class Formconfirmed_Core {
 			// The browser could not reach the service: an unsigned claim, not a check.
 			'unavailable' => 'block' !== $j['action'] && in_array( 'service_unavailable', $reasons, true ),
 			'codes'       => $codes,
+			'verdict_id'  => is_string( $j['id'] ?? null ) && preg_match( '/^[a-f0-9]{32}$/D', $j['id'] ) ? $j['id'] : '',
 		);
 	}
 
@@ -561,30 +678,10 @@ class Formconfirmed_Core {
 
 	/** Keeps a message that was not passed (14 days), so a person stopped by mistake is not lost. */
 	private static function keep( $source, $form, $pairs ) {
-		if ( self::$result ) {
-			Formconfirmed_Held::store( $source, $form, self::reason_key( self::$result ), $pairs );
+		if ( self::$result && ! Formconfirmed_Held::store( $source, $form, self::reason_key( self::$result ), $pairs, Formconfirmed_Held::feedback_context( self::$result['verdict_id'] ?? '' ) ) && 'hold' === self::$decision ) {
+			// A full/unavailable store must not produce a false confirmation of a held message.
+			self::$decision = 'reject';
 		}
-	}
-
-	/** The longest text of a list of pairs - usually the message. */
-	private static function longest( $pairs ) {
-		$best = '';
-		foreach ( (array) $pairs as $p ) {
-			if ( mb_strlen( (string) $p[1] ) > mb_strlen( $best ) ) {
-				$best = (string) $p[1];
-			}
-		}
-		return $best;
-	}
-
-	/** The first e-mail address of a list of pairs. */
-	private static function first_email( $pairs ) {
-		foreach ( (array) $pairs as $p ) {
-			if ( is_email( trim( (string) $p[1] ) ) ) {
-				return trim( (string) $p[1] );
-			}
-		}
-		return '';
 	}
 
 	/** What the visitor sees when a message is refused. */
@@ -637,18 +734,14 @@ class Formconfirmed_Core {
 	}
 
 	private static function cf7_pairs( $submission ) {
-		$pairs = array();
-		$data  = $submission && method_exists( $submission, 'get_posted_data' ) ? (array) $submission->get_posted_data() : array();
-		foreach ( $data as $k => $v ) {
-			if ( self::own_field( $k ) ) {
-				continue;
-			}
-			$v = is_array( $v ) ? implode( ', ', array_filter( $v, 'is_scalar' ) ) : (string) $v;
-			if ( '' !== $v ) {
-				$pairs[] = array( (string) $k, $v );
-			}
+		$data = $submission && method_exists( $submission, 'get_posted_data' ) ? (array) $submission->get_posted_data() : array();
+		$form = $submission && method_exists( $submission, 'get_contact_form' ) ? $submission->get_contact_form() : null;
+		$items = array();
+		foreach ( $form && method_exists( $form, 'scan_form_tags' ) ? $form->scan_form_tags() : array() as $tag ) {
+			if ( ! is_object( $tag ) || ! is_string( $tag->name ?? null ) || ! array_key_exists( $tag->name, $data ) ) { continue; }
+			$items[] = array( 'id' => $tag->name, 'type' => $tag->basetype ?? rtrim( (string) ( $tag->type ?? '' ), '*' ), 'value' => $data[$tag->name], 'autocomplete' => method_exists( $tag, 'get_option' ) ? $tag->get_option( 'autocomplete', '', true ) : '' );
 		}
-		return $pairs;
+		return Formconfirmed_Fields::map( $items, 'cf7', $form && method_exists( $form, 'id' ) ? $form->id() : 0 );
 	}
 
 	public static function cf7_spam( $spam, $submission = null ) {
@@ -659,15 +752,16 @@ class Formconfirmed_Core {
 		if ( ! self::form_enabled( 'cf7', $form && method_exists( $form, 'id' ) ? $form->id() : 0 ) ) {
 			return $spam;   // protection switched off for this form
 		}
-		$pairs = self::cf7_pairs( $submission );
-		$res   = self::verify( 'cf7', null, self::longest( $pairs ), self::first_email( $pairs ) );
+		$mapped = self::cf7_pairs( $submission );
+		$pairs = $mapped['pairs'];
+		$res   = self::verify( 'cf7', null, $mapped['content'], $mapped['email'], '', $mapped['name'], $form && method_exists( $form, 'id' ) ? $form->id() : 0 );
 		$d     = self::decide( $res, 'cf7' );
 		if ( 'pass' === $d ) {
 			return false;
 		}
 		$title = $submission && method_exists( $submission, 'get_contact_form' ) && $submission->get_contact_form() ? (string) $submission->get_contact_form()->title() : 'Contact Form 7';
 		self::keep( 'cf7', $title, $pairs );
-		if ( 'hold' === $d ) {
+		if ( 'hold' === $d && 'hold' === self::$decision ) {
 			return false;   // wpcf7_skip_mail keeps the e-mail back
 		}
 		if ( $submission && method_exists( $submission, 'add_spam_log' ) ) {
@@ -703,19 +797,18 @@ class Formconfirmed_Core {
 		if ( ! empty( $errors[ $id ] ) || ! self::form_enabled( 'wpforms', $id ) ) {
 			return $errors;   // already refused, or protection switched off for this form
 		}
-		$pairs  = array();
+		$items = array();
 		$fields = isset( self::$wpforms_entry['fields'] ) && is_array( self::$wpforms_entry['fields'] ) ? self::$wpforms_entry['fields'] : array();
-		foreach ( $fields as $fid => $wert ) {
-			$teile = array_filter( array_map( 'strval', array_filter( (array) $wert, 'is_scalar' ) ), 'strlen' );
-			if ( $teile ) {
-				$label   = isset( $form_data['fields'][ $fid ]['label'] ) ? (string) $form_data['fields'][ $fid ]['label'] : 'Field ' . $fid;
-				$pairs[] = array( $label, wp_unslash( implode( ' ', $teile ) ) );
-			}
+		foreach ( (array) ( $form_data['fields'] ?? array() ) as $fid => $definition ) {
+			if ( ! is_array( $definition ) || ! array_key_exists( $fid, $fields ) ) { continue; }
+			$items[] = array( 'id' => $fid, 'type' => $definition['type'] ?? '', 'label' => $definition['label'] ?? 'Field ' . $fid, 'value' => wp_unslash( $fields[$fid] ) );
 		}
-		$res = self::verify( 'wpforms', null, self::longest( $pairs ), self::first_email( $pairs ) );
+		$mapped = Formconfirmed_Fields::map( $items, 'wpforms', $id ); $pairs = $mapped['pairs'];
+		$res = self::verify( 'wpforms', null, $mapped['content'], $mapped['email'], '', $mapped['name'], $id );
 		$d   = self::decide( $res, 'wpforms' );
 		if ( 'pass' !== $d ) {
 			self::keep( 'wpforms', isset( $form_data['settings']['form_title'] ) ? (string) $form_data['settings']['form_title'] : 'WPForms', $pairs );
+			$d = self::$decision;
 		}
 		if ( 'reject' === $d ) {
 			$errors[ $id ]['header'] = esc_html( self::message( $res ) );
@@ -741,23 +834,16 @@ class Formconfirmed_Core {
 		if ( $is_spam || ! self::form_enabled( 'gravityforms', isset( $form['id'] ) ? $form['id'] : 0 ) ) {
 			return $is_spam;
 		}
-		$pairs = array();
+		$items = array();
 		foreach ( isset( $form['fields'] ) ? (array) $form['fields'] : array() as $f ) {
-			if ( ! is_object( $f ) || ! isset( $f->id ) ) {
-				continue;
-			}
-			$ids   = ! empty( $f->inputs ) && is_array( $f->inputs ) ? wp_list_pluck( $f->inputs, 'id' ) : array( $f->id );
-			$teile = array();
-			foreach ( $ids as $iid ) {
-				if ( isset( $entry[ (string) $iid ] ) && is_string( $entry[ (string) $iid ] ) && '' !== $entry[ (string) $iid ] ) {
-					$teile[] = $entry[ (string) $iid ];
-				}
-			}
-			if ( $teile ) {
-				$pairs[] = array( isset( $f->label ) && '' !== (string) $f->label ? (string) $f->label : 'Field ' . $f->id, implode( ' ', $teile ) );
-			}
+			if ( ! is_object( $f ) || ! isset( $f->id ) ) { continue; }
+			$ids = ! empty( $f->inputs ) && is_array( $f->inputs ) ? wp_list_pluck( $f->inputs, 'id' ) : array( $f->id );
+			$parts = array();
+			foreach ( $ids as $iid ) { if ( isset( $entry[(string) $iid] ) && is_scalar( $entry[(string) $iid] ) ) { $parts[] = $entry[(string) $iid]; } }
+			$items[] = array( 'id' => $f->id, 'type' => method_exists( $f, 'get_input_type' ) ? $f->get_input_type() : ( $f->type ?? '' ), 'label' => $f->label ?? 'Field ' . $f->id, 'value' => $parts );
 		}
-		$res = self::verify( 'gravityforms', null, self::longest( $pairs ), self::first_email( $pairs ) );
+		$mapped = Formconfirmed_Fields::map( $items, 'gravityforms', $form['id'] ?? 0 ); $pairs = $mapped['pairs'];
+		$res = self::verify( 'gravityforms', null, $mapped['content'], $mapped['email'], '', $mapped['name'], $form['id'] ?? 0 );
 		if ( 'pass' === self::decide( $res, 'gravityforms' ) ) {
 			return false;
 		}
@@ -785,13 +871,17 @@ class Formconfirmed_Core {
 		if ( is_object( $ajax_handler ) && ! empty( $ajax_handler->errors ) ) {
 			return;   // already refused
 		}
-		$pairs = array();
-		foreach ( is_object( $record ) && method_exists( $record, 'get' ) ? (array) $record->get( 'fields' ) : array() as $id => $f ) {
-			if ( isset( $f['value'] ) && is_string( $f['value'] ) && '' !== $f['value'] ) {
-				$pairs[] = array( isset( $f['title'] ) && '' !== (string) $f['title'] ? (string) $f['title'] : (string) $id, $f['value'] );
-			}
+		$items = array(); $definitions = array();
+		foreach ( is_object( $record ) && method_exists( $record, 'get_form_settings' ) ? (array) $record->get_form_settings( 'form_fields' ) : array() as $f ) {
+			if ( is_array( $f ) && is_string( $f['custom_id'] ?? null ) ) { $definitions[$f['custom_id']] = $f; }
 		}
-		$res = self::verify( 'elementor', null, self::longest( $pairs ), self::first_email( $pairs ) );
+		foreach ( is_object( $record ) && method_exists( $record, 'get' ) ? (array) $record->get( 'fields' ) : array() as $id => $f ) {
+			if ( ! is_array( $f ) || ( $definitions && ! isset( $definitions[$id] ) ) ) { continue; }
+			$def = $definitions[$id] ?? array();
+			$items[] = array( 'id' => $id, 'type' => $def['field_type'] ?? $f['type'] ?? '', 'label' => $f['title'] ?? (string) $id, 'value' => $f['value'] ?? '' );
+		}
+		$mapped = Formconfirmed_Fields::map( $items, 'elementor', 0 ); $pairs = $mapped['pairs'];
+		$res = self::verify( 'elementor', null, $mapped['content'], $mapped['email'], '', $mapped['name'], self::elementor_form_key( $record ) );
 		if ( 'pass' === self::decide( $res, 'elementor' ) ) {
 			return;
 		}
@@ -828,16 +918,12 @@ class Formconfirmed_Core {
 		if ( ! empty( $errors ) || ! is_array( $form_data ) || ! self::form_enabled( 'fluentform', is_object( $form ) && isset( $form->id ) ? $form->id : 0 ) ) {
 			return $errors;
 		}
-		$pairs = array();
-		foreach ( $form_data as $name => $wert ) {
-			if ( self::own_field( $name ) ) {
-				continue;
-			}
-			$teile = array_filter( array_map( 'strval', array_filter( (array) $wert, 'is_scalar' ) ), 'strlen' );
-			if ( $teile ) {
-				$pairs[] = array( (string) $name, implode( ' ', $teile ) );
-			}
+		$items = array();
+		foreach ( (array) $fields as $name => $definition ) {
+			if ( ! is_array( $definition ) || ! array_key_exists( $name, $form_data ) ) { continue; }
+			$items[] = array( 'id' => $name, 'type' => $definition['element'] ?? '', 'label' => $definition['settings']['label'] ?? (string) $name, 'value' => $form_data[$name], 'autocomplete' => $definition['attributes']['autocomplete'] ?? '' );
 		}
+		$mapped = Formconfirmed_Fields::map( $items, 'fluentform', is_object( $form ) ? ( $form->id ?? 0 ) : 0 ); $pairs = $mapped['pairs'];
 		// Fluent Forms keeps only its own fields in $form_data; token, trap field and backup fields travel in the raw "data" string.
 		$raw = array();
 		wp_parse_str( self::posted( 'data' ), $raw );
@@ -846,7 +932,7 @@ class Formconfirmed_Core {
 			self::FIELD => isset( $raw[ self::FIELD ] ) && is_string( $raw[ self::FIELD ] ) ? $raw[ self::FIELD ] : '',
 			self::HP    => isset( $raw[ self::HP ] ) && is_string( $raw[ self::HP ] ) ? $raw[ self::HP ] : '',
 		);
-		$res = self::verify( 'fluentform', $src, self::longest( $pairs ), self::first_email( $pairs ) );
+		$res = self::verify( 'fluentform', $src, $mapped['content'], $mapped['email'], '', $mapped['name'], is_object( $form ) ? ( $form->id ?? 0 ) : 0 );
 		if ( 'pass' === self::decide( $res, 'fluentform' ) ) {
 			return $errors;
 		}
@@ -871,17 +957,15 @@ class Formconfirmed_Core {
 		if ( ! empty( $errors ) || ! is_array( $values ) || ! self::form_enabled( 'formidable', isset( $values['form_id'] ) ? $values['form_id'] : 0 ) ) {
 			return $errors;
 		}
-		$pairs = array();
-		foreach ( isset( $values['item_meta'] ) && is_array( $values['item_meta'] ) ? $values['item_meta'] : array() as $fid => $wert ) {
-			if ( ! is_numeric( $fid ) ) {
-				continue;
-			}
-			$teile = array_filter( array_map( 'strval', array_filter( (array) $wert, 'is_scalar' ) ), 'strlen' );
-			if ( $teile ) {
-				$pairs[] = array( 'Field ' . $fid, wp_unslash( implode( ' ', $teile ) ) );
-			}
+		$items = array(); $form_id = (int) ( $values['form_id'] ?? 0 );
+		foreach ( isset( $values['item_meta'] ) && is_array( $values['item_meta'] ) ? $values['item_meta'] : array() as $fid => $value ) {
+			if ( ! is_numeric( $fid ) || ! class_exists( 'FrmField' ) || ! method_exists( 'FrmField', 'getOne' ) ) { continue; }
+			$f = FrmField::getOne( (int) $fid );
+			if ( ! is_object( $f ) || (int) ( $f->form_id ?? 0 ) !== $form_id ) { continue; }
+			$items[] = array( 'id' => $fid, 'key' => $f->field_key ?? (string) $fid, 'type' => $f->type ?? '', 'label' => $f->name ?? 'Field ' . $fid, 'value' => wp_unslash( $value ) );
 		}
-		$res = self::verify( 'formidable', null, self::longest( $pairs ), self::first_email( $pairs ) );
+		$mapped = Formconfirmed_Fields::map( $items, 'formidable', $form_id ); $pairs = $mapped['pairs'];
+		$res = self::verify( 'formidable', null, $mapped['content'], $mapped['email'], '', $mapped['name'], $form_id );
 		if ( 'pass' === self::decide( $res, 'formidable' ) ) {
 			return $errors;
 		}
@@ -918,7 +1002,7 @@ class Formconfirmed_Core {
 		if ( ! empty( $c['comment_type'] ) && 'comment' !== $c['comment_type'] ) {
 			return $approved;
 		}
-		$res = self::verify( 'comments', null, isset( $c['comment_content'] ) ? (string) $c['comment_content'] : '', isset( $c['comment_author_email'] ) ? (string) $c['comment_author_email'] : '' );
+		$res = self::verify( 'comments', null, isset( $c['comment_content'] ) ? (string) $c['comment_content'] : '', isset( $c['comment_author_email'] ) ? (string) $c['comment_author_email'] : '', '', isset( $c['comment_author'] ) && is_string( $c['comment_author'] ) ? $c['comment_author'] : '' );
 		$d   = self::decide( $res, 'comments' );
 		if ( 'block' === $res['action'] ) {
 			wp_die( esc_html( self::message( $res ) ), '', array( 'response' => 400, 'back_link' => true ) );
@@ -943,7 +1027,7 @@ class Formconfirmed_Core {
 		if ( ! isset( $GLOBALS['pagenow'] ) || 'wp-login.php' !== $GLOBALS['pagenow'] || ! is_wp_error( $errors ) || $errors->has_errors() ) {
 			return $errors;
 		}
-		$res = self::verify( 'register', null, '', (string) $email );
+		$res = self::verify( 'register', null, '', (string) $email, '', is_string( $login ) ? $login : '' );
 		if ( 'pass' !== self::decide( $res, 'register' ) ) {
 			$errors->add( 'formconfirmed', esc_html( self::message( $res ) ) );
 		}
@@ -967,7 +1051,7 @@ class Formconfirmed_Core {
 		if ( ! is_wp_error( $errors ) || $errors->has_errors() ) {
 			return;
 		}
-		$res = self::verify( 'woo_register', null, '', (string) $email );
+		$res = self::verify( 'woo_register', null, '', (string) $email, '', is_string( $username ) ? $username : '' );
 		if ( 'pass' !== self::decide( $res, 'woo_register' ) ) {
 			$errors->add( 'formconfirmed', esc_html( self::message( $res ) ) );
 		}
