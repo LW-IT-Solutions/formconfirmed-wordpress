@@ -597,13 +597,13 @@ class Formconfirmed_Admin {
 			echo '<div class="fc-card"><p>' . esc_html__( 'The formexposed plugin is active: held messages wait in its quarantine (Settings -> formexposed -> Quarantine), together with the messages its protection layer stopped.', 'formconfirmed' ) . '</p></div>';
 			return;
 		}
+		/* translators: 1: number of days, 2: e-mail address */
+		echo '<p class="fc-lead">' . esc_html( sprintf( __( 'Messages that were not passed wait here for %1$d days. "Send" passes one to the mailer for %2$s; this does not confirm delivery.', 'formconfirmed' ), Formconfirmed_Held::DAYS, Formconfirmed_Held::recipient() ) ) . '</p>';
 		$filters = Formconfirmed_Held::filters( array( 'status' => self::query_arg( 'held_status' ), 'form' => self::query_arg( 'held_form' ), 'after' => self::query_arg( 'held_after' ), 'before' => self::query_arg( 'held_before' ) ) );
 		$page = max( 1, absint( self::query_arg( 'held_page' ) ) );
 		$list = Formconfirmed_Held::listing( $filters, $page, 50 ); $rows = $list['rows'];
 		self::held_filters( $filters ); self::held_pagination( $list );
 		echo '<p class="description">' . esc_html__( 'Rate a message explicitly as Not spam or Spam. Only its opaque check ID and your rating are sent to the service. Sending or deleting a message does not rate it. Older messages without a check ID cannot be rated.', 'formconfirmed' ) . '</p>';
-		/* translators: 1: number of days, 2: e-mail address */
-		echo '<p class="fc-lead">' . esc_html( sprintf( __( 'Messages that were not passed wait here for %1$d days. "Send" passes one to the mailer for %2$s; this does not confirm delivery.', 'formconfirmed' ), Formconfirmed_Held::DAYS, Formconfirmed_Held::recipient() ) ) . '</p>';
 		if ( ! $rows ) {
 			echo '<div class="fc-card fc-empty"><p>' . esc_html__( 'No held messages.', 'formconfirmed' ) . '</p></div>';
 			return;

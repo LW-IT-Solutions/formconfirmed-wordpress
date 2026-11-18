@@ -4,7 +4,7 @@ Tags: spam, anti-spam, captcha, contact form 7, honeypot
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.6.0
+Stable tag: 1.6.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -56,10 +56,15 @@ This plugin connects to **formconfirmed**, a form protection service run by LW I
 * **Account connection (optional)**, when you click *Connect with formconfirmed*: the site hostname and a hash of a random verifier are sent to `https://formconfirmed.com/v1/connect/start`. You approve the request in your account at `https://formconfirmed.com/wordpress-connect`. When you complete the connection, the request code and the verifier are sent to `https://formconfirmed.com/v1/connect/poll`, which hands over the keys once. Requests expire after ten minutes; the verifier and the secret key are never part of the approval address.
 * **Technical integration report**, after a successful connection test, hourly through WordPress cron while the protection is on and not paused, and when you click *Send report now*: the site key, the site hostname, the service and widget addresses, the plugin component and its version are sent to `https://formconfirmed.com/v1/integration`, signed with a key derived from your secret key. No visitor data, no form contents, no secret key.
 * **Feedback (optional)**, only when you click *Not spam* or *Spam* on a held message: your secret key, the opaque check ID of that message and your rating are sent to `https://formconfirmed.com/v1/feedback`. No message fields.
-* **Only if the formexposed plugin is installed and connected** and you click *Get keys from my account*: a request to `https://formexposed.com/api/plugin/protect` with the site address and the connection keys of the formexposed plugin.
+* **Keys through formexposed (optional)**: see the formexposed service below.
 
 Terms of use: https://formconfirmed.com/en/legal/terms
 Privacy policy: https://formconfirmed.com/en/legal/privacy
+
+The plugin can also connect to **formexposed**, a form monitoring service run by LW IT Solutions (Lukas Wojcik) on servers in the EU. This happens only if the separate formexposed plugin is installed and connected to a formexposed account, and only when you click *Get keys from my account* in the formconfirmed settings. It is used to fetch the formconfirmed site key and secret key of that account, so you do not have to copy them by hand. The plugin then sends your site's hostname and the connection key and secret of the formexposed plugin to `https://formexposed.com/api/plugin/protect`, which returns the two formconfirmed keys. No visitor data and no form contents are sent. Without that click nothing is sent to formexposed.
+
+formexposed terms of use: https://formexposed.com/en/legal/terms
+formexposed privacy policy: https://formexposed.com/en/legal/privacy
 
 The backup check runs on your own server only and sends nothing anywhere.
 
@@ -134,6 +139,11 @@ Form references: numeric provider form IDs are namespaced per installation. Core
 Technical report status is stored locally without response text, keys or hostnames. Failed deliveries retain the last accepted time and schedule a retry after 5, 10, 20, 40 and at most 60 minutes. Requests are at least 30 seconds apart. Manual retries require manage_options, POST and the action nonce. WP-Cron requires site visits (or a separately configured system cron).
 
 == Changelog ==
+
+= 1.6.1 =
+* Readme: the optional formexposed key request is documented as an external service of its own, with the data sent, when it is sent, and links to the formexposed terms of use and privacy policy.
+* Held messages: the explanation of the 14-day quarantine now stands above the filters instead of below the list header.
+* Field mapping: the role selector is wide enough for its longest choice.
 
 = 1.6.0 =
 * Stable opaque form references connect individual forms to the account statistics. IDs come from server-selected form objects, never visitor fields; names and keys can change without changing the ID.
