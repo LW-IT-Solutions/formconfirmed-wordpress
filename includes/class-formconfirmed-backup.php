@@ -104,7 +104,10 @@ class Formconfirmed_Backup {
 		self::$passed = null;
 	}
 
-	/** Our fields of the current submission. */
+	/**
+	 * Our fields of the current submission, sanitized as they are read. The trap field keeps every printable character
+	 * (FILTER_SANITIZE_SPECIAL_CHARS), so a filled trap never turns into an empty one.
+	 */
 	private static function fields() {
 		$names = array( 'formconfirmed_t', 'formconfirmed_s', 'formconfirmed_j', 'formconfirmed_hp', 'formconfirmed_pow' );
 		$out   = array();
@@ -112,7 +115,9 @@ class Formconfirmed_Backup {
 			if ( is_array( self::$data ) ) {
 				$out[ $n ] = isset( self::$data[ $n ] ) && is_string( self::$data[ $n ] ) ? self::$data[ $n ] : null;
 			} else {
-				$v         = filter_input( INPUT_POST, $n, FILTER_UNSAFE_RAW );
+				$v         = 'formconfirmed_hp' === $n
+					? filter_input( INPUT_POST, $n, FILTER_SANITIZE_SPECIAL_CHARS, FILTER_FLAG_STRIP_LOW )
+					: filter_input( INPUT_POST, $n, FILTER_CALLBACK, array( 'options' => 'sanitize_text_field' ) );
 				$out[ $n ] = is_string( $v ) ? $v : null;
 			}
 		}

@@ -146,7 +146,7 @@ class Formconfirmed_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$tab = sanitize_key( (string) filter_input( INPUT_GET, 'tab', FILTER_UNSAFE_RAW ) );   // only picks the tab that is shown
+		$tab = sanitize_key( (string) filter_input( INPUT_GET, 'tab', FILTER_CALLBACK, array( 'options' => 'sanitize_key' ) ) );   // only picks the tab that is shown
 		$tab = in_array( $tab, self::TABS, true ) ? $tab : 'overview';
 		$msg = get_transient( 'formconfirmed_msg' );
 		delete_transient( 'formconfirmed_msg' );
@@ -219,8 +219,8 @@ class Formconfirmed_Admin {
 
 	/** Read-only screen filter from the query string. It changes nothing, so it needs no nonce. */
 	private static function query_arg( $key ) {
-		$value = filter_input( INPUT_GET, $key, FILTER_UNSAFE_RAW );
-		return is_string( $value ) ? sanitize_text_field( $value ) : '';
+		$value = filter_input( INPUT_GET, $key, FILTER_CALLBACK, array( 'options' => 'sanitize_text_field' ) );
+		return is_string( $value ) ? $value : '';
 	}
 
 	public static function action_report() {

@@ -502,9 +502,19 @@ class Formconfirmed_Core {
 		echo wp_kses( self::element( $adapter ), array( 'div' => array( 'class' => true, 'data-sitekey' => true, 'data-purpose' => true ) ) );
 	}
 
-	/** A field of the current POST request (the form plugins verify their own requests). */
+	/**
+	 * A field of the current POST request (the form plugins verify their own requests), sanitized as it is read:
+	 * the trap field with FILTER_SANITIZE_SPECIAL_CHARS (a filled trap never turns into an empty one), "data" (the
+	 * URL-encoded form of Fluent Forms) with FILTER_SANITIZE_URL, every other field with sanitize_text_field().
+	 */
 	public static function posted( $name ) {
-		$v = filter_input( INPUT_POST, $name, FILTER_UNSAFE_RAW );
+		if ( self::HP === $name ) {
+			$v = filter_input( INPUT_POST, $name, FILTER_SANITIZE_SPECIAL_CHARS, FILTER_FLAG_STRIP_LOW );
+		} elseif ( 'data' === $name ) {
+			$v = filter_input( INPUT_POST, $name, FILTER_SANITIZE_URL );
+		} else {
+			$v = filter_input( INPUT_POST, $name, FILTER_CALLBACK, array( 'options' => 'sanitize_text_field' ) );
+		}
 		return is_string( $v ) ? $v : '';
 	}
 
