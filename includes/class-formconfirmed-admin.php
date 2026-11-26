@@ -842,7 +842,7 @@ class Formconfirmed_Admin {
 				$o          = Formconfirmed_Core::opt();
 				$o['ok_at'] = time();
 				Formconfirmed_Core::save_opt( $o );
-				Formconfirmed_Core::report_integration();
+				Formconfirmed_Core::report_integration( true );   // part of the connection test; starts the hourly report
 				$msg = array( 'ok', __( 'Connected: the service answers and accepts the secret key.', 'formconfirmed' ) );
 			} elseif ( $codes ) {
 				$msg = array( 'error', self::problem_text( implode( ',', $codes ) ) );

@@ -3,7 +3,7 @@
  * Plugin Name:       formconfirmed – Invisible spam protection for forms
  * Plugin URI:        https://formconfirmed.com/
  * Description:       Invisible spam protection for Contact Form 7, WPForms, Gravity Forms, Elementor Pro, Fluent Forms, Formidable, comments, registration and login: proof of work, timing and trap-field signals and an optional message check, hosted in the EU. No puzzles, no cookies.
- * Version:           1.6.3
+ * Version:           1.6.4
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            LW IT Solutions
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'FORMCONFIRMED_VERSION', '1.6.3' );
+define( 'FORMCONFIRMED_VERSION', '1.6.4' );
 define( 'FORMCONFIRMED_FILE', __FILE__ );
 
 // The address of the service (includes/services.json). wp-config.php may override it for staging:

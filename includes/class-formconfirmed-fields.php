@@ -97,9 +97,11 @@ class Formconfirmed_Fields {
 				$v = implode( ' ', $parts );
 			}
 			if ( ! is_scalar( $v ) ) { continue; }
-			$v = mb_substr( (string) $v, 0, 5000 );
+			// The value comes from the form plugin that received the submission: sanitized here, before it is used,
+			// stored or sent (line breaks of a message are kept).
+			$v = mb_substr( sanitize_textarea_field( (string) $v ), 0, 5000 );
 			if ( '' === trim( $v ) ) { continue; }
-			$label = is_string( $f['label'] ?? null ) ? $f['label'] : $id;
+			$label = sanitize_text_field( is_string( $f['label'] ?? null ) ? $f['label'] : (string) $id );
 			$out['pairs'][] = array( mb_substr( $label, 0, 100 ), $v );
 			if ( 'name' === $role ) { $names[] = mb_substr( $v, 0, 200 ); }
 			elseif ( 'content' === $role ) { $messages[] = mb_substr( $v, 0, 2000 ); }

@@ -86,7 +86,10 @@ class Formconfirmed_Core {
 		if ( ! self::on() || self::paused() ) {
 			return;
 		}
-		if ( ! wp_next_scheduled( 'formconfirmed_integration_report' ) ) { wp_schedule_event( time() + 60, 'hourly', 'formconfirmed_integration_report' ); }
+		// The hourly report starts only after a report went through once - the connection test or "Send report now".
+		if ( self::report_status()['success'] > 0 && ! wp_next_scheduled( 'formconfirmed_integration_report' ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', 'formconfirmed_integration_report' );
+		}
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'register_script' ) );
 		add_action( 'login_enqueue_scripts', array( __CLASS__, 'register_script' ) );
 		add_filter( 'script_loader_tag', array( __CLASS__, 'async_tag' ), 10, 2 );
@@ -157,6 +160,7 @@ class Formconfirmed_Core {
 	public static function report_integration( $manual = false ) {
 		if ( ! self::on() || self::paused() ) { return false; }
 		$state = self::report_status(); $now = time();
+		if ( ! $manual && ! $state['success'] ) { return false; }   // never by itself before a report went through once
 		if ( $state['attempt'] && $now < $state['attempt']+30 ) { return false; }
 		if ( ! $manual && $state['next_retry']>$now ) { return false; }
 		$o = self::opt();
@@ -597,8 +601,8 @@ class Formconfirmed_Core {
 			}
 			return $none;
 		}
-		$codes   = array_values( array_filter( (array) ( isset( $j['error-codes'] ) ? $j['error-codes'] : array() ), 'is_string' ) );
-		$reasons = array_values( array_filter( (array) ( isset( $j['reasons'] ) ? $j['reasons'] : array() ), 'is_string' ) );
+		$codes   = array_values( array_map( 'sanitize_key', array_filter( (array) ( isset( $j['error-codes'] ) ? $j['error-codes'] : array() ), 'is_string' ) ) );
+		$reasons = array_values( array_map( 'sanitize_text_field', array_filter( (array) ( isset( $j['reasons'] ) ? $j['reasons'] : array() ), 'is_string' ) ) );
 		$own     = array_values( array_intersect( $codes, self::NO_CHECK_CODES ) );
 		if ( $own ) {
 			$none['codes'] = $own;
@@ -939,10 +943,12 @@ class Formconfirmed_Core {
 		// Fluent Forms keeps only its own fields in $form_data; token, trap field and backup fields travel in the raw "data" string.
 		$raw = array();
 		wp_parse_str( self::posted( 'data' ), $raw );
-		Formconfirmed_Backup::use_data( $raw );
+		// Only our own fields are taken out of it: the backup fields (sanitized in Formconfirmed_Backup), the token and
+		// the trap field (which keeps every printable character, so a filled trap never turns into an empty one).
+		Formconfirmed_Backup::use_data( array_intersect_key( $raw, array_flip( Formconfirmed_Backup::FIELDS ) ) );
 		$src = array(
-			self::FIELD => isset( $raw[ self::FIELD ] ) && is_string( $raw[ self::FIELD ] ) ? $raw[ self::FIELD ] : '',
-			self::HP    => isset( $raw[ self::HP ] ) && is_string( $raw[ self::HP ] ) ? $raw[ self::HP ] : '',
+			self::FIELD => isset( $raw[ self::FIELD ] ) && is_string( $raw[ self::FIELD ] ) ? sanitize_text_field( $raw[ self::FIELD ] ) : '',
+			self::HP    => isset( $raw[ self::HP ] ) && is_string( $raw[ self::HP ] ) ? (string) filter_var( $raw[ self::HP ], FILTER_SANITIZE_SPECIAL_CHARS, FILTER_FLAG_STRIP_LOW ) : '',
 		);
 		$res = self::verify( 'fluentform', $src, $mapped['content'], $mapped['email'], '', $mapped['name'], is_object( $form ) ? ( $form->id ?? 0 ) : 0 );
 		if ( 'pass' === self::decide( $res, 'fluentform' ) ) {

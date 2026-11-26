@@ -94,6 +94,9 @@ class Formconfirmed_Backup {
 	}
 
 	/** Fluent Forms sends our fields inside its own "data" string. */
+	/** Our hidden fields of the backup check. */
+	const FIELDS = array( 'formconfirmed_t', 'formconfirmed_s', 'formconfirmed_j', 'formconfirmed_hp', 'formconfirmed_pow' );
+
 	public static function use_data( $raw ) {
 		self::$data = is_array( $raw ) ? $raw : array();
 	}
@@ -109,7 +112,7 @@ class Formconfirmed_Backup {
 	 * (FILTER_SANITIZE_SPECIAL_CHARS), so a filled trap never turns into an empty one.
 	 */
 	private static function fields() {
-		$names = array( 'formconfirmed_t', 'formconfirmed_s', 'formconfirmed_j', 'formconfirmed_hp', 'formconfirmed_pow' );
+		$names = self::FIELDS;
 		$out   = array();
 		foreach ( $names as $n ) {
 			if ( is_array( self::$data ) ) {
