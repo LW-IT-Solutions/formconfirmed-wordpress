@@ -513,7 +513,9 @@ class Formconfirmed_Core {
 		} elseif ( 'data' === $name ) {
 			$v = filter_input( INPUT_POST, $name, FILTER_SANITIZE_URL );
 		} else {
-			$v = filter_input( INPUT_POST, $name, FILTER_CALLBACK, array( 'options' => 'sanitize_text_field' ) );
+			// phpcs:disable WordPress.Security.NonceVerification.Missing -- Our own hidden fields in the forms of other plugins, which verify their own requests; the values are checked against our signatures.
+			$v = isset( $_POST[ $name ] ) && is_string( $_POST[ $name ] ) ? sanitize_text_field( wp_unslash( $_POST[ $name ] ) ) : '';
+			// phpcs:enable WordPress.Security.NonceVerification.Missing
 		}
 		return is_string( $v ) ? $v : '';
 	}

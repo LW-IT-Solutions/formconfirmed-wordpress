@@ -146,7 +146,8 @@ class Formconfirmed_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$tab = sanitize_key( (string) filter_input( INPUT_GET, 'tab', FILTER_CALLBACK, array( 'options' => 'sanitize_key' ) ) );   // only picks the tab that is shown
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Only picks the tab that is shown; nothing is changed.
+		$tab = isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
 		$tab = in_array( $tab, self::TABS, true ) ? $tab : 'overview';
 		$msg = get_transient( 'formconfirmed_msg' );
 		delete_transient( 'formconfirmed_msg' );
@@ -219,8 +220,8 @@ class Formconfirmed_Admin {
 
 	/** Read-only screen filter from the query string. It changes nothing, so it needs no nonce. */
 	private static function query_arg( $key ) {
-		$value = filter_input( INPUT_GET, $key, FILTER_CALLBACK, array( 'options' => 'sanitize_text_field' ) );
-		return is_string( $value ) ? $value : '';
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only screen filter; nothing is changed.
+		return isset( $_GET[ $key ] ) && is_string( $_GET[ $key ] ) ? sanitize_text_field( wp_unslash( $_GET[ $key ] ) ) : '';
 	}
 
 	public static function action_report() {

@@ -113,12 +113,19 @@ class Formconfirmed_Backup {
 		$out   = array();
 		foreach ( $names as $n ) {
 			if ( is_array( self::$data ) ) {
-				$out[ $n ] = isset( self::$data[ $n ] ) && is_string( self::$data[ $n ] ) ? self::$data[ $n ] : null;
-			} else {
-				$v         = 'formconfirmed_hp' === $n
-					? filter_input( INPUT_POST, $n, FILTER_SANITIZE_SPECIAL_CHARS, FILTER_FLAG_STRIP_LOW )
-					: filter_input( INPUT_POST, $n, FILTER_CALLBACK, array( 'options' => 'sanitize_text_field' ) );
+				// The data a form plugin handed over (Fluent Forms): only our fields, sanitized like the POST fields below.
+				$v = isset( self::$data[ $n ] ) && is_string( self::$data[ $n ] ) ? self::$data[ $n ] : null;
+				if ( null !== $v ) {
+					$v = 'formconfirmed_hp' === $n ? (string) filter_var( $v, FILTER_SANITIZE_SPECIAL_CHARS, FILTER_FLAG_STRIP_LOW ) : sanitize_text_field( $v );
+				}
+				$out[ $n ] = $v;
+			} elseif ( 'formconfirmed_hp' === $n ) {
+				$v         = filter_input( INPUT_POST, $n, FILTER_SANITIZE_SPECIAL_CHARS, FILTER_FLAG_STRIP_LOW );
 				$out[ $n ] = is_string( $v ) ? $v : null;
+			} else {
+				// phpcs:disable WordPress.Security.NonceVerification.Missing -- Our own hidden fields in the forms of other plugins, which verify their own requests; the values are checked against our signatures.
+				$out[ $n ] = isset( $_POST[ $n ] ) && is_string( $_POST[ $n ] ) ? sanitize_text_field( wp_unslash( $_POST[ $n ] ) ) : null;
+				// phpcs:enable WordPress.Security.NonceVerification.Missing
 			}
 		}
 		return $out;

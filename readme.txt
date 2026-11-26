@@ -4,7 +4,7 @@ Tags: spam, anti-spam, captcha, contact form 7, honeypot
 Requires at least: 6.2
 Tested up to: 7.2
 Requires PHP: 7.4
-Stable tag: 1.6.2
+Stable tag: 1.6.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -139,6 +139,9 @@ Form references: numeric provider form IDs are namespaced per installation. Core
 Technical report status is stored locally without response text, keys or hostnames. Failed deliveries retain the last accepted time and schedule a retry after 5, 10, 20, 40 and at most 60 minutes. Requests are at least 30 seconds apart. Manual retries require manage_options, POST and the action nonce. WP-Cron requires site visits (or a separately configured system cron).
 
 == Changelog ==
+
+= 1.6.3 =
+* Request values are read with isset(), wp_unslash() and the matching sanitize function (no FILTER_CALLBACK); the fields handed over by Fluent Forms are sanitized the same way.
 
 = 1.6.2 =
 * Every request value is sanitized as it is read (sanitize_text_field, sanitize_key, FILTER_SANITIZE_URL, FILTER_SANITIZE_SPECIAL_CHARS) instead of being read raw and checked later.
