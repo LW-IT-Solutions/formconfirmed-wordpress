@@ -4,7 +4,7 @@ Tags: spam, anti-spam, captcha, contact form 7, honeypot
 Requires at least: 6.2
 Tested up to: 7.2
 Requires PHP: 7.4
-Stable tag: 1.6.4
+Stable tag: 1.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -140,6 +140,15 @@ Technical report status is stored locally without response text, keys or hostnam
 
 == Changelog ==
 
+= 1.7.0 =
+* Overview: a shield shows the state of the protection, a checklist names what protects the forms (protected forms, message check, backup check, what happens to unclear messages), and a bar shows how the answers of the service divide into allowed, blocked, flagged and without a clear answer, with shares in percent.
+* The delivery of the technical report shows its state as a badge, with the time since the last attempt.
+* Held messages: the reason is a coloured label, the time since receipt is shown, and deleting a message asks for confirmation in a dialog of the page.
+* Forms: a bar and a counter show how many forms and places are protected, each form plugin shows how many of its forms are switched on.
+* Settings: the typed secret key can be shown before saving, the choices for unclear messages are cards, and the cleanup status is a compact list.
+* Developers: copy buttons for the code examples. Test and report buttons show that they are working.
+* No change to what is checked, sent or stored, and none to the outage rule.
+
 = 1.6.4 =
 * Field values from the form plugins are sanitized before they are used, stored or sent; answers of the service are sanitized before they are stored.
 * The hourly integration report starts only after a report went through once (connection test or Send report now), as the readme says.
@@ -195,6 +204,9 @@ Technical report status is stored locally without response text, keys or hostnam
 * Takes over the settings of the formexposed form protection tab.
 
 == Upgrade Notice ==
+
+= 1.7.0 =
+Clearer settings page: protection checklist, answer distribution, labelled held messages with a delete confirmation. No change to checks or data.
 
 = 1.6.0 =
 Adds stable form references for the account statistics and shows the delivery of the technical report. Keep the formconfirmed_form_namespace option when you move the site.

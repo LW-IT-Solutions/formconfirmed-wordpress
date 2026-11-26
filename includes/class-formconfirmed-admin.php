@@ -40,6 +40,21 @@ class Formconfirmed_Admin {
 	public static function assets( $hook ) {
 		if ( 'settings_page_' . self::PAGE === $hook ) {
 			wp_enqueue_style( 'formconfirmed-admin', plugins_url( 'assets/css/admin.css', FORMCONFIRMED_FILE ), array(), FORMCONFIRMED_VERSION );
+			wp_enqueue_script( 'formconfirmed-admin', plugins_url( 'assets/js/admin.js', FORMCONFIRMED_FILE ), array(), FORMCONFIRMED_VERSION, array( 'in_footer' => true ) );
+			wp_localize_script(
+				'formconfirmed-admin',
+				'formconfirmedAdmin',
+				array(
+					'deleteTitle' => __( 'Delete this held message?', 'formconfirmed' ),
+					'deleteText'  => __( 'The message is removed from this site for good. Deleting does not rate it as spam.', 'formconfirmed' ),
+					'delete'      => __( 'Delete', 'formconfirmed' ),
+					'cancel'      => __( 'Cancel', 'formconfirmed' ),
+					'copy'        => __( 'Copy', 'formconfirmed' ),
+					'copied'      => __( 'Copied', 'formconfirmed' ),
+					'show'        => __( 'Show the entered key', 'formconfirmed' ),
+					'hide'        => __( 'Hide the entered key', 'formconfirmed' ),
+				)
+			);
 		}
 	}
 
@@ -168,7 +183,13 @@ class Formconfirmed_Admin {
 					<a class="nav-tab<?php echo $tab === $k ? ' nav-tab-active' : ''; ?>" href="<?php echo esc_url( self::url( 'overview' === $k ? array() : array( 'tab' => $k ) ) ); ?>"<?php echo $tab === $k ? ' aria-current="page"' : ''; ?>>
 						<?php echo esc_html( $l ); ?>
 						<?php if ( 'held' === $k && $open > 0 ) : ?>
-							<span class="fc-count"><?php echo esc_html( number_format_i18n( $open ) ); ?></span>
+							<span class="fc-count" aria-hidden="true"><?php echo esc_html( number_format_i18n( $open ) ); ?></span>
+							<span class="screen-reader-text">
+								<?php
+								/* translators: %d: number of held messages waiting for review. */
+								echo esc_html( sprintf( _n( '(%d waiting)', '(%d waiting)', $open, 'formconfirmed' ), $open ) );
+								?>
+							</span>
 						<?php endif; ?>
 					</a>
 				<?php endforeach; ?>
@@ -212,6 +233,47 @@ class Formconfirmed_Admin {
 		return '<span class="fc-badge fc-badge-' . esc_attr( $state ) . '">' . esc_html( $t[ $state ] ) . '</span>';
 	}
 
+	/** Dashicon for the state of the protection. */
+	private static function state_icon( $state ) {
+		$icons = array(
+			'off'     => 'shield',
+			'waiting' => 'clock',
+			'problem' => 'warning',
+			'on'      => 'shield-alt',
+		);
+		return $icons[ $state ];
+	}
+
+	/**
+	 * What protects the forms right now, as a checklist: each item with state ok, warn or off.
+	 *
+	 * @return array List of [state, text].
+	 */
+	private static function checklist() {
+		$o     = Formconfirmed_Core::opt();
+		$n     = count( self::protected_list() );
+		$items = array(
+			/* translators: %d: number of protected forms and places */
+			array( $n ? 'ok' : 'warn', $n ? sprintf( _n( '%d form or place is protected.', '%d forms and places are protected.', $n, 'formconfirmed' ), $n ) : __( 'No form is protected yet.', 'formconfirmed' ) ),
+			array( $o['content'] ? 'ok' : 'off', $o['content'] ? __( 'Message check: names and message text are checked.', 'formconfirmed' ) : __( 'Message check: off.', 'formconfirmed' ) ),
+		);
+		if ( Formconfirmed_Backup::delegated() ) {
+			$items[] = array( 'ok', __( 'Backup check: the protection layer of the formexposed plugin.', 'formconfirmed' ) );
+		} elseif ( Formconfirmed_Backup::own() ) {
+			$items[] = array( 'ok', __( 'Backup check on this site: ready.', 'formconfirmed' ) );
+		} else {
+			$items[] = array( 'off', __( 'Backup check: off.', 'formconfirmed' ) );
+		}
+		$items[] = array( 'ok', 'reject' === $o['uncertain'] ? __( 'Unclear messages are refused; a copy is kept.', 'formconfirmed' ) : __( 'Unclear messages are held for review.', 'formconfirmed' ) );
+		return $items;
+	}
+
+	/** Relative time such as "2 hours ago". */
+	private static function ago( $time ) {
+		/* translators: %s: time span such as "2 hours". */
+		return sprintf( __( '%s ago', 'formconfirmed' ), human_time_diff( (int) $time ) );
+	}
+
 
 	/** True for a POST request; the method is read, unslashed and sanitized. */
 	public static function is_post() {
@@ -246,11 +308,28 @@ class Formconfirmed_Admin {
 		$format = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
 		?>
 		<section class="fc-card" id="fc-report-status" aria-labelledby="fc-report-title">
-			<h2 id="fc-report-title"><?php esc_html_e( 'Technical report delivery', 'formconfirmed' ); ?></h2>
-			<dl>
-			<?php foreach ( array( 'attempt'=>__( 'Last attempt', 'formconfirmed' ), 'success'=>__( 'Last accepted report', 'formconfirmed' ) ) as $key=>$label ) : ?>
-				<dt><strong><?php echo esc_html( $label ); ?></strong></dt>
-				<dd><?php echo esc_html( $s[$key] ? wp_date( $format, $s[$key] ) : __( 'Not yet', 'formconfirmed' ) ); ?></dd>
+			<div class="fc-card-head">
+				<h2 id="fc-report-title"><span class="dashicons dashicons-chart-bar" aria-hidden="true"></span> <?php esc_html_e( 'Technical report delivery', 'formconfirmed' ); ?></h2>
+				<?php
+				if ( ! $s['attempt'] ) {
+					echo '<span class="fc-badge fc-badge-off">' . esc_html__( 'Not yet', 'formconfirmed' ) . '</span>';
+				} elseif ( $s['ok'] ) {
+					echo '<span class="fc-badge fc-badge-on">' . esc_html__( 'Accepted', 'formconfirmed' ) . '</span>';
+				} else {
+					echo '<span class="fc-badge fc-badge-bad">' . esc_html__( 'Failed', 'formconfirmed' ) . '</span>';
+				}
+				?>
+			</div>
+			<dl class="fc-facts">
+			<?php foreach ( array( 'attempt' => array( __( 'Last attempt', 'formconfirmed' ), 'update' ), 'success' => array( __( 'Last accepted report', 'formconfirmed' ), 'yes-alt' ) ) as $key => $item ) : ?>
+				<div class="fc-fact">
+					<dt><span class="dashicons dashicons-<?php echo esc_attr( $item[1] ); ?>" aria-hidden="true"></span> <?php echo esc_html( $item[0] ); ?></dt>
+					<dd><?php echo esc_html( $s[ $key ] ? wp_date( $format, $s[ $key ] ) : __( 'Not yet', 'formconfirmed' ) ); ?>
+						<?php if ( $s[ $key ] ) : ?>
+							<span class="fc-muted">(<?php echo esc_html( self::ago( $s[ $key ] ) ); ?>)</span>
+						<?php endif; ?>
+					</dd>
+				</div>
 			<?php endforeach; ?>
 			</dl>
 			<?php if ( $s['attempt'] && ! $s['ok'] ) : ?>
@@ -263,10 +342,11 @@ class Formconfirmed_Admin {
 			<?php endif; ?>
 			<p class="description"><?php esc_html_e( 'WordPress runs scheduled reports when the site receives visits. With few visits or disabled WP-Cron, a report may be late; this alone does not prove that protection is unavailable.', 'formconfirmed' ); ?></p>
 			<?php if ( Formconfirmed_Core::on() && ! Formconfirmed_Core::paused() ) : ?>
-			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="fc-busy-form">
 				<?php wp_nonce_field( 'formconfirmed_report' ); ?>
 				<input type="hidden" name="action" value="formconfirmed_report">
-				<button class="button"><?php esc_html_e( 'Send report now', 'formconfirmed' ); ?></button>
+				<button class="button"><span class="dashicons dashicons-upload" aria-hidden="true"></span> <?php esc_html_e( 'Send report now', 'formconfirmed' ); ?></button>
+				<span class="spinner"></span>
 			</form>
 			<?php endif; ?>
 		</section>
@@ -288,10 +368,13 @@ class Formconfirmed_Admin {
 		$p     = self::recent_problem();
 		$s     = $o['stats'];
 		?>
-		<div class="fc-card fc-hero">
+		<div class="fc-card fc-hero fc-hero-<?php echo esc_attr( $state ); ?>">
 			<div class="fc-hero-head">
-				<?php echo wp_kses( self::badge( $state ), array( 'span' => array( 'class' => true ) ) ); ?>
-				<h2><?php esc_html_e( 'Invisible spam protection for your forms', 'formconfirmed' ); ?></h2>
+				<span class="fc-shield dashicons dashicons-<?php echo esc_attr( self::state_icon( $state ) ); ?>" aria-hidden="true"></span>
+				<div class="fc-hero-title">
+					<?php echo wp_kses( self::badge( $state ), array( 'span' => array( 'class' => true ) ) ); ?>
+					<h2><?php esc_html_e( 'Invisible spam protection for your forms', 'formconfirmed' ); ?></h2>
+				</div>
 			</div>
 			<?php if ( 'off' === $state ) : ?>
 				<p><?php esc_html_e( 'Three steps and your forms are protected - without puzzles for your visitors.', 'formconfirmed' ); ?></p>
@@ -312,24 +395,30 @@ class Formconfirmed_Admin {
 			<?php else : ?>
 				<p>
 				<?php
-				$n = count( self::protected_list() );
-				/* translators: %d: number of protected forms and places */
-				echo esc_html( sprintf( _n( '%d form or place is protected.', '%d forms and places are protected.', $n, 'formconfirmed' ), $n ) ) . ' ';
 				if ( $o['ok_at'] ) {
 					/* translators: %s: date and time */
-					echo esc_html( sprintf( __( 'Last answer of the service: %s.', 'formconfirmed' ), wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (int) $o['ok_at'] ) ) );
+					echo esc_html( sprintf( __( 'Last answer of the service: %s.', 'formconfirmed' ), wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (int) $o['ok_at'] ) ) ) . ' ';
+					echo '<span class="fc-muted">(' . esc_html( self::ago( $o['ok_at'] ) ) . ')</span>';
 				} else {
 					esc_html_e( 'No message has been checked yet.', 'formconfirmed' );
 				}
 				?>
 				</p>
 			<?php endif; ?>
+			<?php if ( 'off' !== $state ) : ?>
+				<ul class="fc-checks">
+					<?php foreach ( self::checklist() as $item ) : ?>
+						<li class="fc-check-<?php echo esc_attr( $item[0] ); ?>"><span class="dashicons dashicons-<?php echo esc_attr( 'ok' === $item[0] ? 'yes-alt' : ( 'warn' === $item[0] ? 'warning' : 'minus' ) ); ?>" aria-hidden="true"></span> <?php echo esc_html( $item[1] ); ?></li>
+					<?php endforeach; ?>
+				</ul>
+			<?php endif; ?>
 			<?php if ( Formconfirmed_Core::on() ) : ?>
 				<div class="fc-actions">
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="fc-busy-form">
 						<?php wp_nonce_field( 'formconfirmed_test' ); ?>
 						<input type="hidden" name="action" value="formconfirmed_test">
-						<button class="button button-primary"><?php esc_html_e( 'Test the connection', 'formconfirmed' ); ?></button>
+						<button class="button button-primary"><span class="dashicons dashicons-admin-site-alt3" aria-hidden="true"></span> <?php esc_html_e( 'Test the connection', 'formconfirmed' ); ?></button>
+						<span class="spinner"></span>
 					</form>
 					<a class="button" href="<?php echo esc_url( self::url( array( 'tab' => 'forms' ) ) ); ?>"><?php esc_html_e( 'Choose forms', 'formconfirmed' ); ?></a>
 					<a class="button" href="<?php echo esc_url( FORMCONFIRMED_APP . '/protection' ); ?>" target="_blank" rel="noopener"><?php esc_html_e( 'Open your account', 'formconfirmed' ); ?></a>
@@ -343,25 +432,52 @@ class Formconfirmed_Admin {
 		<?php self::report_panel(); ?>
 		<?php if ( Formconfirmed_Core::on() ) : ?>
 		<h2 class="fc-h"><?php esc_html_e( 'Since activation', 'formconfirmed' ); ?></h2>
-		<div class="fc-tiles">
-			<?php
-			$tiles = array(
-				array( $s['allow'], __( 'allowed', 'formconfirmed' ), 'ok' ),
-				array( $s['block'], __( 'blocked', 'formconfirmed' ), 'bad' ),
-				array( $s['flag'], __( 'flagged', 'formconfirmed' ), 'warn' ),
-				array( $s['unreachable'], __( 'without a clear answer', 'formconfirmed' ), 'warn' ),
-				array( $s['fallback'], __( 'delivered by the backup check', 'formconfirmed' ), 'ok' ),
-				array( $s['held'], __( 'held for review', 'formconfirmed' ), 'warn' ),
-				array( $s['rejected'], __( 'refused (a copy is kept)', 'formconfirmed' ), 'bad' ),
-			);
-			foreach ( $tiles as $t ) :
-				?>
-				<div class="fc-tile fc-tile-<?php echo esc_attr( $t[2] ); ?>"><span class="fc-tile-n"><?php echo esc_html( number_format_i18n( (int) $t[0] ) ); ?></span><span class="fc-tile-l"><?php echo esc_html( $t[1] ); ?></span></div>
-			<?php endforeach; ?>
+		<?php
+		$answers = array(
+			array( (int) $s['allow'], __( 'allowed', 'formconfirmed' ), 'ok', 'yes-alt' ),
+			array( (int) $s['block'], __( 'blocked', 'formconfirmed' ), 'bad', 'dismiss' ),
+			array( (int) $s['flag'], __( 'flagged', 'formconfirmed' ), 'warn', 'flag' ),
+			array( (int) $s['unreachable'], __( 'without a clear answer', 'formconfirmed' ), 'gray', 'warning' ),
+		);
+		$outage  = array(
+			array( (int) $s['fallback'], __( 'delivered by the backup check', 'formconfirmed' ), 'ok', 'backup' ),
+			array( (int) $s['held'], __( 'held for review', 'formconfirmed' ), 'warn', 'clock' ),
+			array( (int) $s['rejected'], __( 'refused (a copy is kept)', 'formconfirmed' ), 'bad', 'no' ),
+		);
+		$total   = array_sum( wp_list_pluck( $answers, 0 ) );
+		?>
+		<div class="fc-card fc-dist">
+			<h3><?php esc_html_e( 'Answers of the service', 'formconfirmed' ); ?></h3>
+			<?php if ( $total ) : ?>
+				<div class="fc-dist-bar" aria-hidden="true">
+					<?php foreach ( $answers as $a ) : ?>
+						<?php if ( $a[0] ) : ?>
+							<span class="fc-seg-<?php echo esc_attr( $a[2] ); ?>" style="flex-grow:<?php echo esc_attr( (string) $a[0] ); ?>"></span>
+						<?php endif; ?>
+					<?php endforeach; ?>
+				</div>
+			<?php endif; ?>
+			<div class="fc-tiles">
+				<?php foreach ( $answers as $t ) : ?>
+					<div class="fc-tile fc-tile-<?php echo esc_attr( $t[2] ); ?>">
+						<span class="fc-tile-n"><span class="dashicons dashicons-<?php echo esc_attr( $t[3] ); ?>" aria-hidden="true"></span><?php echo esc_html( number_format_i18n( $t[0] ) ); ?></span>
+						<span class="fc-tile-l"><?php echo esc_html( $t[1] ); ?><?php echo $total ? ' · ' . esc_html( number_format_i18n( $t[0] / $total * 100, 1 ) ) . '&nbsp;%' : ''; ?></span>
+					</div>
+				<?php endforeach; ?>
+			</div>
+			<h3><?php esc_html_e( 'Without a clear pass', 'formconfirmed' ); ?></h3>
+			<div class="fc-tiles">
+				<?php foreach ( $outage as $t ) : ?>
+					<div class="fc-tile fc-tile-<?php echo esc_attr( $t[2] ); ?>">
+						<span class="fc-tile-n"><span class="dashicons dashicons-<?php echo esc_attr( $t[3] ); ?>" aria-hidden="true"></span><?php echo esc_html( number_format_i18n( $t[0] ) ); ?></span>
+						<span class="fc-tile-l"><?php echo esc_html( $t[1] ); ?></span>
+					</div>
+				<?php endforeach; ?>
+			</div>
 		</div>
 
 		<div class="fc-card">
-			<h2><?php esc_html_e( 'When the service cannot be reached', 'formconfirmed' ); ?></h2>
+			<h2><span class="dashicons dashicons-backup" aria-hidden="true"></span> <?php esc_html_e( 'When the service cannot be reached', 'formconfirmed' ); ?></h2>
 			<p>
 			<?php
 			if ( Formconfirmed_Backup::delegated() ) {
@@ -438,6 +554,26 @@ class Formconfirmed_Admin {
 		);
 		?>
 		<p class="fc-lead"><?php esc_html_e( 'Choose where formconfirmed checks submissions. Switch a form plugin on or off as a whole, or single forms inside it.', 'formconfirmed' ); ?></p>
+		<?php
+		$places = 0;
+		$guard  = count( self::protected_list() );
+		foreach ( Formconfirmed_Core::ADAPTERS as $a ) {
+			if ( Formconfirmed_Core::available( $a ) ) {
+				$places += in_array( $a, Formconfirmed_Core::PER_FORM, true ) ? count( Formconfirmed_Core::forms_of( $a ) ) : 1;
+			}
+		}
+		?>
+		<?php if ( $places ) : ?>
+			<div class="fc-card fc-card-tight fc-summary">
+				<span class="fc-meter" aria-hidden="true"><span class="fc-meter-fill" style="width:<?php echo esc_attr( (string) round( $guard / $places * 100 ) ); ?>%"></span></span>
+				<span>
+					<?php
+					/* translators: 1: number of protected forms and places, 2: number of forms and places on this site */
+					echo esc_html( sprintf( __( '%1$d of %2$d forms and places on this site are protected (saved state).', 'formconfirmed' ), $guard, $places ) );
+					?>
+				</span>
+			</div>
+		<?php endif; ?>
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 			<?php wp_nonce_field( 'formconfirmed_save_forms' ); ?>
 			<input type="hidden" name="action" value="formconfirmed_save_forms">
@@ -452,11 +588,21 @@ class Formconfirmed_Admin {
 				?>
 				<section class="fc-card fc-place<?php echo $avail ? '' : ' fc-place-off'; ?>" aria-labelledby="fc-h-<?php echo esc_attr( $a ); ?>">
 					<div class="fc-place-head">
-						<h2 id="fc-h-<?php echo esc_attr( $a ); ?>"><?php echo esc_html( $labels[ $a ] ); ?></h2>
+						<h2 id="fc-h-<?php echo esc_attr( $a ); ?>"><?php echo esc_html( $labels[ $a ] ); ?>
+							<?php if ( $avail && $forms ) : ?>
+								<?php $on_forms = count( array_filter( array_keys( $forms ), function ( $id ) use ( $a ) { return Formconfirmed_Core::form_enabled( $a, $id ); } ) ); ?>
+								<span class="fc-badge fc-badge-<?php echo esc_attr( in_array( $a, $o['adapters'], true ) && $on_forms ? 'on' : 'off' ); ?>">
+									<?php
+									/* translators: 1: number of protected forms, 2: number of forms */
+									echo esc_html( sprintf( __( '%1$d of %2$d forms', 'formconfirmed' ), in_array( $a, $o['adapters'], true ) ? $on_forms : 0, count( $forms ) ) );
+									?>
+								</span>
+							<?php endif; ?>
+						</h2>
 						<?php if ( $avail ) : ?>
 							<?php self::toggle( 'adapters[' . $a . ']', in_array( $a, $o['adapters'], true ), __( 'Protect', 'formconfirmed' ), 'fc-a-' . $a ); ?>
 						<?php else : ?>
-							<span class="fc-muted"><?php echo 'register' === $a ? esc_html__( 'Registration is closed on this site (Settings -> General).', 'formconfirmed' ) : esc_html__( 'Not installed', 'formconfirmed' ); ?></span>
+							<span class="fc-muted"><span class="dashicons dashicons-<?php echo 'register' === $a ? 'lock' : 'admin-plugins'; ?>" aria-hidden="true"></span> <?php echo 'register' === $a ? esc_html__( 'Registration is closed on this site (Settings -> General).', 'formconfirmed' ) : esc_html__( 'Not installed', 'formconfirmed' ); ?></span>
 							<?php if ( in_array( $a, $o['adapters'], true ) ) : ?>
 								<input type="hidden" name="adapters[<?php echo esc_attr( $a ); ?>]" value="1">
 							<?php endif; ?>
@@ -524,7 +670,7 @@ class Formconfirmed_Admin {
 			<?php wp_nonce_field( 'formconfirmed_save' ); ?>
 			<input type="hidden" name="action" value="formconfirmed_save">
 			<div class="fc-card">
-				<h2><?php esc_html_e( 'Keys', 'formconfirmed' ); ?></h2>
+				<h2><span class="dashicons dashicons-admin-network" aria-hidden="true"></span> <?php esc_html_e( 'Keys', 'formconfirmed' ); ?></h2>
 				<p class="description">
 					<?php esc_html_e( 'Both keys are shown in your account under Protection.', 'formconfirmed' ); ?>
 					<a href="<?php echo esc_url( FORMCONFIRMED_APP . ( Formconfirmed_Core::on() ? '/protection' : '/register' ) ); ?>" target="_blank" rel="noopener"><?php echo Formconfirmed_Core::on() ? esc_html__( 'Open your account', 'formconfirmed' ) : esc_html__( 'Create a free account', 'formconfirmed' ); ?></a>
@@ -534,7 +680,8 @@ class Formconfirmed_Admin {
 						<td><input id="fc-site" name="site_key" class="regular-text code" value="<?php echo esc_attr( $o['site_key'] ); ?>" autocomplete="off" spellcheck="false" placeholder="fcp_pub_...">
 						<p class="description"><?php esc_html_e( 'Public, printed in the form.', 'formconfirmed' ); ?></p></td></tr>
 					<tr><th scope="row"><label for="fc-secret"><?php esc_html_e( 'Secret key', 'formconfirmed' ); ?></label></th>
-						<td><input id="fc-secret" name="secret" type="password" class="regular-text code" value="" autocomplete="new-password" spellcheck="false" placeholder="<?php echo $o['secret'] ? esc_attr__( 'saved - leave empty to keep', 'formconfirmed' ) : 'fcp_sec_...'; ?>">
+						<td><span class="fc-secret"><input id="fc-secret" name="secret" type="password" class="regular-text code" value="" autocomplete="new-password" spellcheck="false" placeholder="<?php echo $o['secret'] ? esc_attr__( 'saved - leave empty to keep', 'formconfirmed' ) : 'fcp_sec_...'; ?>"><button type="button" class="button fc-reveal" aria-controls="fc-secret" aria-pressed="false" hidden><span class="dashicons dashicons-visibility" aria-hidden="true"></span><span class="screen-reader-text"><?php esc_html_e( 'Show the entered key', 'formconfirmed' ); ?></span></button></span>
+							<span class="fc-badge fc-badge-<?php echo $o['secret'] ? 'on' : 'off'; ?>"><?php echo $o['secret'] ? esc_html__( 'Saved', 'formconfirmed' ) : esc_html__( 'Not set', 'formconfirmed' ); ?></span>
 						<?php if ( $o['secret'] ) : ?>
 							<label class="fc-block"><input type="checkbox" name="remove_keys" value="1"> <?php esc_html_e( 'Remove both keys (switches the protection off)', 'formconfirmed' ); ?></label>
 						<?php endif; ?>
@@ -542,7 +689,7 @@ class Formconfirmed_Admin {
 				</table>
 			</div>
 			<div class="fc-card">
-				<h2><?php esc_html_e( 'Checks', 'formconfirmed' ); ?></h2>
+				<h2><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> <?php esc_html_e( 'Checks', 'formconfirmed' ); ?></h2>
 				<div class="fc-row">
 					<?php self::toggle( 'content', $o['content'], __( 'Check names and message text', 'formconfirmed' ), 'fc-content' ); ?>
 					<p class="description"><?php esc_html_e( 'Sends the mapped name and message text along: spam filter in every plan, AI check where your plan includes it. Processed briefly on the service servers. AI checks use a temporary internal queue.', 'formconfirmed' ); ?></p>
@@ -557,7 +704,7 @@ class Formconfirmed_Admin {
 				</div>
 			</div>
 			<div class="fc-card">
-				<h2><?php esc_html_e( 'Not a clear pass', 'formconfirmed' ); ?></h2>
+				<h2><span class="dashicons dashicons-flag" aria-hidden="true"></span> <?php esc_html_e( 'Not a clear pass', 'formconfirmed' ); ?></h2>
 				<fieldset>
 					<legend class="description"><?php esc_html_e( 'When the service flags a message as suspicious, or gives no clear answer and the backup check did not pass:', 'formconfirmed' ); ?></legend>
 					<label class="fc-choice"><input type="radio" name="uncertain" value="hold" <?php checked( 'hold', $o['uncertain'] ); ?>>
@@ -574,20 +721,22 @@ class Formconfirmed_Admin {
 
 	private static function cleanup_notice() {
 		$s = Formconfirmed_Held::maintenance_status();
-		echo '<div class="fc-card"><h2>' . esc_html__( 'Local quarantine cleanup', 'formconfirmed' ) . '</h2>';
+		echo '<div class="fc-card fc-card-tight"><h2><span class="dashicons dashicons-trash" aria-hidden="true"></span> ' . esc_html__( 'Local quarantine cleanup', 'formconfirmed' ) . '</h2>';
 		if ( ! $s['available'] ) {
 			echo '<p>' . esc_html__( 'Cleanup status is unavailable. Check the local database.', 'formconfirmed' ) . '</p></div>';
 			return;
 		}
-		/* translators: 1: count of messages older than retention limit */
-		echo '<p>' . esc_html( sprintf( __( 'Messages older than 14 days: %1$d', 'formconfirmed' ), $s['overdue'] ) ) . '</p>';
 		$format = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
 		$last = $s['last_success'] ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $s['last_success'] ), $format ) : __( 'Not run yet', 'formconfirmed' );
 		$next = $s['next_run'] ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $s['next_run'] ), $format ) : __( 'Not scheduled', 'formconfirmed' );
+		echo '<ul class="fc-stats">';
+		/* translators: 1: count of messages older than retention limit */
+		echo '<li class="' . ( $s['overdue'] ? 'fc-stat-warn' : '' ) . '"><span class="dashicons dashicons-' . ( $s['overdue'] ? 'warning' : 'yes-alt' ) . '" aria-hidden="true"></span> ' . esc_html( sprintf( __( 'Messages older than 14 days: %1$d', 'formconfirmed' ), $s['overdue'] ) ) . '</li>';
 		/* translators: 1: local date/time or not run yet */
-		echo '<p>' . esc_html( sprintf( __( 'Last successful cleanup batch: %1$s', 'formconfirmed' ), $last ) ) . '</p>';
+		echo '<li><span class="dashicons dashicons-backup" aria-hidden="true"></span> ' . esc_html( sprintf( __( 'Last successful cleanup batch: %1$s', 'formconfirmed' ), $last ) ) . '</li>';
 		/* translators: 1: local date/time or not scheduled */
-		echo '<p>' . esc_html( sprintf( __( 'Next cleanup: %1$s', 'formconfirmed' ), $next ) ) . '</p>';
+		echo '<li><span class="dashicons dashicons-calendar-alt" aria-hidden="true"></span> ' . esc_html( sprintf( __( 'Next cleanup: %1$s', 'formconfirmed' ), $next ) ) . '</li>';
+		echo '</ul>';
 		if ( $s['failed'] ) { echo '<p>' . esc_html__( 'Some entries could not be removed. A later batch will retry; check storage if this persists.', 'formconfirmed' ) . '</p>'; }
 		echo '<p class="description">' . esc_html__( 'Cleanup runs in batches of at most 100 messages. On low-traffic sites, configure a system scheduler for WordPress cron as described in the plugin readme.', 'formconfirmed' ) . '</p></div>';
 	}
@@ -606,7 +755,8 @@ class Formconfirmed_Admin {
 		self::held_filters( $filters ); self::held_pagination( $list );
 		echo '<p class="description">' . esc_html__( 'Rate a message explicitly as Not spam or Spam. Only its opaque check ID and your rating are sent to the service. Sending or deleting a message does not rate it. Older messages without a check ID cannot be rated.', 'formconfirmed' ) . '</p>';
 		if ( ! $rows ) {
-			echo '<div class="fc-card fc-empty"><p>' . esc_html__( 'No held messages.', 'formconfirmed' ) . '</p></div>';
+			echo '<div class="fc-card fc-empty"><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span><p class="fc-empty-title">' . esc_html__( 'No held messages.', 'formconfirmed' ) . '</p>';
+			echo '<p>' . esc_html__( 'Messages land here when the service flags them, blocks them, or gives no clear answer and the backup check did not pass. Nothing waits for review right now.', 'formconfirmed' ) . '</p></div>';
 			return;
 		}
 		?>
@@ -615,9 +765,11 @@ class Formconfirmed_Admin {
 			<tbody>
 			<?php foreach ( $rows as $r ) : ?>
 				<tr>
-					<td><?php echo esc_html( get_date_from_gmt( $r['date'], get_option( 'date_format' ) . ' ' . get_option( 'time_format' ) ) ); ?></td>
-					<td><?php echo esc_html( $r['form'] ); ?></td>
-					<td><?php echo esc_html( Formconfirmed_Held::reason_text( $r['reason'] ) ); ?></td>
+					<td><?php echo esc_html( get_date_from_gmt( $r['date'], get_option( 'date_format' ) . ' ' . get_option( 'time_format' ) ) ); ?>
+						<span class="fc-ago"><?php echo esc_html( self::ago( strtotime( $r['date'] . ' UTC' ) ) ); ?></span></td>
+					<td><span class="fc-form-name"><?php echo esc_html( $r['form'] ); ?></span></td>
+					<td><?php $why = 'fc_block' === $r['reason'] ? array( 'bad', 'dismiss' ) : ( 'fc_flag' === $r['reason'] ? array( 'warn', 'flag' ) : array( 'gray', 'warning' ) ); ?>
+						<span class="fc-why fc-why-<?php echo esc_attr( $why[0] ); ?>"><span class="dashicons dashicons-<?php echo esc_attr( $why[1] ); ?>" aria-hidden="true"></span> <?php echo esc_html( Formconfirmed_Held::reason_text( $r['reason'] ) ); ?></span></td>
 					<td>
 						<?php foreach ( $r['pairs'] as $pair ) : ?>
 							<div><strong><?php echo esc_html( (string) $pair[0] ); ?>:</strong> <?php echo esc_html( wp_trim_words( (string) $pair[1], 40 ) ); ?></div>
@@ -625,7 +777,7 @@ class Formconfirmed_Admin {
 					</td>
 					<td class="fc-nowrap">
 						<?php if ( $r['released'] ) : ?>
-							<span class="fc-badge fc-badge-on"><?php esc_html_e( 'Passed to mailer', 'formconfirmed' ); ?></span>
+							<span class="fc-badge fc-badge-on"><span class="dashicons dashicons-email-alt" aria-hidden="true"></span> <?php esc_html_e( 'Passed to mailer', 'formconfirmed' ); ?></span>
 						<?php elseif ( ! empty( $r['release_state'] ) ) : ?>
 							<span class="fc-badge"><?php esc_html_e( 'Delivery pending or uncertain; check before resending.', 'formconfirmed' ); ?></span>
 						<?php else : ?>
@@ -633,7 +785,7 @@ class Formconfirmed_Admin {
 								<input type="hidden" name="action" value="formconfirmed_release">
 								<input type="hidden" name="id" value="<?php echo (int) $r['id']; ?>">
 								<?php wp_nonce_field( 'formconfirmed_release_' . $r['id'] ); ?>
-								<button class="button button-small button-primary" type="submit"><?php esc_html_e( 'Send', 'formconfirmed' ); ?></button>
+								<button class="button button-small button-primary" type="submit"><span class="dashicons dashicons-email-alt" aria-hidden="true"></span> <?php esc_html_e( 'Send', 'formconfirmed' ); ?></button>
 							</form>
 						<?php endif; ?>
 						<?php if ( ! empty( $r['feedback_available'] ) ) : ?>
@@ -649,7 +801,7 @@ class Formconfirmed_Admin {
 							<?php endforeach; ?>
 							</div>
 						<?php endif; ?>
-						<a class="button button-small button-link-delete" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=formconfirmed_delete&id=' . $r['id'] ), 'formconfirmed_delete' ) ); ?>"><?php esc_html_e( 'Delete', 'formconfirmed' ); ?></a>
+						<a class="button button-small fc-delete" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=formconfirmed_delete&id=' . $r['id'] ), 'formconfirmed_delete' ) ); ?>"><span class="dashicons dashicons-trash" aria-hidden="true"></span> <?php esc_html_e( 'Delete', 'formconfirmed' ); ?><span class="screen-reader-text"> <?php echo esc_html( $r['form'] ); ?></span></a>
 					</td>
 				</tr>
 			<?php endforeach; ?>
