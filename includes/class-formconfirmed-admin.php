@@ -53,6 +53,17 @@ class Formconfirmed_Admin {
 					'copied'      => __( 'Copied', 'formconfirmed' ),
 					'show'        => __( 'Show the entered key', 'formconfirmed' ),
 					'hide'        => __( 'Hide the entered key', 'formconfirmed' ),
+					/* translators: 1: number of forms shown, 2: number of all forms */
+					'shown'       => __( 'Forms shown: %1$d of %2$d', 'formconfirmed' ),
+					/* translators: 1: number of protected forms, 2: number of forms */
+					'formsOf'     => __( '%1$d of %2$d forms', 'formconfirmed' ),
+					/* translators: 1: number of protected forms and places, 2: number of forms and places */
+					'after'       => __( 'After saving: %1$d of %2$d protected', 'formconfirmed' ),
+					/* translators: %d: number of switches changed since the page was loaded */
+					'unsaved'     => __( 'Unsaved changes: %d', 'formconfirmed' ),
+					'undone'      => __( 'Changes undone.', 'formconfirmed' ),
+					/* translators: %d: number of held messages shown */
+					'heldShown'   => __( 'Messages shown: %d', 'formconfirmed' ),
 				)
 			);
 		}
@@ -274,6 +285,47 @@ class Formconfirmed_Admin {
 		return sprintf( __( '%s ago', 'formconfirmed' ), human_time_diff( (int) $time ) );
 	}
 
+	/**
+	 * Ring chart of the answers of the service (inline SVG). Every segment is focusable and names its count and
+	 * share; the tiles next to it carry the same numbers as text, so nothing depends on the picture.
+	 *
+	 * @param array $answers List of [count, label, tone, icon].
+	 * @param int   $total   Sum of all counts.
+	 */
+	private static function donut( $answers, $total ) {
+		$r      = 48;
+		$circ   = 2 * M_PI * $r;
+		$parts  = array_values( array_filter( $answers, static function ( $a ) { return $a[0] > 0; } ) );
+		$gap    = count( $parts ) > 1 ? 2 : 0;
+		$offset = 0.0;
+		?>
+		<figure class="fc-donut" data-fc-donut>
+			<svg viewBox="0 0 120 120" role="group" aria-label="<?php esc_attr_e( 'Answers of the service', 'formconfirmed' ); ?>">
+				<circle class="fc-donut-track" cx="60" cy="60" r="<?php echo esc_attr( (string) $r ); ?>"></circle>
+				<?php foreach ( $parts as $a ) : ?>
+					<?php
+					$len   = $a[0] / $total * $circ;
+					$draw  = max( 0.8, $len - $gap );
+					/* translators: 1: label such as "allowed", 2: number, 3: share in percent */
+					$label = sprintf( __( '%1$s: %2$s (%3$s %%)', 'formconfirmed' ), $a[1], number_format_i18n( $a[0] ), number_format_i18n( $a[0] / $total * 100, 1 ) );
+					?>
+					<circle class="fc-donut-seg fc-donut-<?php echo esc_attr( $a[2] ); ?>" cx="60" cy="60" r="<?php echo esc_attr( (string) $r ); ?>"
+						stroke-dasharray="<?php echo esc_attr( round( $draw, 2 ) . ' ' . round( $circ, 2 ) ); ?>"
+						stroke-dashoffset="<?php echo esc_attr( (string) round( -$offset, 2 ) ); ?>"
+						tabindex="0" role="img" aria-label="<?php echo esc_attr( $label ); ?>"
+						data-fc-key="<?php echo esc_attr( $a[2] ); ?>" data-fc-n="<?php echo esc_attr( number_format_i18n( $a[0] ) ); ?>"
+						data-fc-l="<?php echo esc_attr( $a[1] . ' · ' . number_format_i18n( $a[0] / $total * 100, 1 ) . ' %' ); ?>"><title><?php echo esc_html( $label ); ?></title></circle>
+					<?php $offset += $len; ?>
+				<?php endforeach; ?>
+			</svg>
+			<figcaption class="fc-donut-center" aria-hidden="true">
+				<strong data-fc-center-n data-fc-default="<?php echo esc_attr( number_format_i18n( $total ) ); ?>"><?php echo esc_html( number_format_i18n( $total ) ); ?></strong>
+				<span data-fc-center-l data-fc-default="<?php echo esc_attr( _n( 'answer', 'answers', $total, 'formconfirmed' ) ); ?>"><?php echo esc_html( _n( 'answer', 'answers', $total, 'formconfirmed' ) ); ?></span>
+			</figcaption>
+		</figure>
+		<?php
+	}
+
 
 	/** True for a POST request; the method is read, unslashed and sanitized. */
 	public static function is_post() {
@@ -448,28 +500,24 @@ class Formconfirmed_Admin {
 		?>
 		<div class="fc-card fc-dist">
 			<h3><?php esc_html_e( 'Answers of the service', 'formconfirmed' ); ?></h3>
-			<?php if ( $total ) : ?>
-				<div class="fc-dist-bar" aria-hidden="true">
-					<?php foreach ( $answers as $a ) : ?>
-						<?php if ( $a[0] ) : ?>
-							<span class="fc-seg-<?php echo esc_attr( $a[2] ); ?>" style="flex-grow:<?php echo esc_attr( (string) $a[0] ); ?>"></span>
-						<?php endif; ?>
+			<div class="fc-dist-top<?php echo $total ? '' : ' fc-dist-empty'; ?>">
+				<?php if ( $total ) : ?>
+					<?php self::donut( $answers, $total ); ?>
+				<?php endif; ?>
+				<div class="fc-tiles">
+					<?php foreach ( $answers as $t ) : ?>
+						<div class="fc-tile fc-tile-<?php echo esc_attr( $t[2] ); ?>" data-fc-key="<?php echo esc_attr( $t[2] ); ?>">
+							<span class="fc-tile-n"><span class="dashicons dashicons-<?php echo esc_attr( $t[3] ); ?>" aria-hidden="true"></span><span data-fc-count="<?php echo esc_attr( (string) $t[0] ); ?>"><?php echo esc_html( number_format_i18n( $t[0] ) ); ?></span></span>
+							<span class="fc-tile-l"><?php echo esc_html( $t[1] ); ?><?php echo $total ? ' · ' . esc_html( number_format_i18n( $t[0] / $total * 100, 1 ) ) . '&nbsp;%' : ''; ?></span>
+						</div>
 					<?php endforeach; ?>
 				</div>
-			<?php endif; ?>
-			<div class="fc-tiles">
-				<?php foreach ( $answers as $t ) : ?>
-					<div class="fc-tile fc-tile-<?php echo esc_attr( $t[2] ); ?>">
-						<span class="fc-tile-n"><span class="dashicons dashicons-<?php echo esc_attr( $t[3] ); ?>" aria-hidden="true"></span><?php echo esc_html( number_format_i18n( $t[0] ) ); ?></span>
-						<span class="fc-tile-l"><?php echo esc_html( $t[1] ); ?><?php echo $total ? ' · ' . esc_html( number_format_i18n( $t[0] / $total * 100, 1 ) ) . '&nbsp;%' : ''; ?></span>
-					</div>
-				<?php endforeach; ?>
 			</div>
 			<h3><?php esc_html_e( 'Without a clear pass', 'formconfirmed' ); ?></h3>
 			<div class="fc-tiles">
 				<?php foreach ( $outage as $t ) : ?>
 					<div class="fc-tile fc-tile-<?php echo esc_attr( $t[2] ); ?>">
-						<span class="fc-tile-n"><span class="dashicons dashicons-<?php echo esc_attr( $t[3] ); ?>" aria-hidden="true"></span><?php echo esc_html( number_format_i18n( $t[0] ) ); ?></span>
+						<span class="fc-tile-n"><span class="dashicons dashicons-<?php echo esc_attr( $t[3] ); ?>" aria-hidden="true"></span><span data-fc-count="<?php echo esc_attr( (string) $t[0] ); ?>"><?php echo esc_html( number_format_i18n( $t[0] ) ); ?></span></span>
 						<span class="fc-tile-l"><?php echo esc_html( $t[1] ); ?></span>
 					</div>
 				<?php endforeach; ?>
@@ -564,8 +612,9 @@ class Formconfirmed_Admin {
 		}
 		?>
 		<?php if ( $places ) : ?>
-			<div class="fc-card fc-card-tight fc-summary">
-				<span class="fc-meter" aria-hidden="true"><span class="fc-meter-fill" style="width:<?php echo esc_attr( (string) round( $guard / $places * 100 ) ); ?>%"></span></span>
+			<div class="fc-card fc-card-tight fc-summary" data-fc-summary data-fc-saved="<?php echo esc_attr( (string) $guard ); ?>" data-fc-places="<?php echo esc_attr( (string) $places ); ?>">
+				<span class="fc-meter" aria-hidden="true"><span class="fc-meter-fill" style="width:<?php echo esc_attr( (string) round( $guard / $places * 100 ) ); ?>%"></span><span class="fc-meter-ghost"></span></span>
+				<span class="fc-summary-live" data-fc-summary-live aria-live="polite"></span>
 				<span>
 					<?php
 					/* translators: 1: number of protected forms and places, 2: number of forms and places on this site */
@@ -574,7 +623,26 @@ class Formconfirmed_Admin {
 				</span>
 			</div>
 		<?php endif; ?>
-		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+		<div class="fc-toolbar" data-fc-toolbar hidden>
+			<label class="fc-search">
+				<span class="dashicons dashicons-search" aria-hidden="true"></span>
+				<span class="screen-reader-text"><?php esc_html_e( 'Search forms', 'formconfirmed' ); ?></span>
+				<input type="search" data-fc-search placeholder="<?php esc_attr_e( 'Search forms', 'formconfirmed' ); ?>" aria-keyshortcuts="/" autocomplete="off">
+				<kbd class="fc-kbd" title="<?php esc_attr_e( 'Press / to search', 'formconfirmed' ); ?>">/</kbd>
+			</label>
+			<div class="fc-chips" role="group" aria-label="<?php esc_attr_e( 'Show forms', 'formconfirmed' ); ?>">
+				<button type="button" class="fc-chip" data-fc-show="all" aria-pressed="true"><?php esc_html_e( 'All', 'formconfirmed' ); ?></button>
+				<button type="button" class="fc-chip" data-fc-show="on" aria-pressed="false"><span class="fc-dot fc-dot-ok" aria-hidden="true"></span><?php esc_html_e( 'Protected', 'formconfirmed' ); ?></button>
+				<button type="button" class="fc-chip" data-fc-show="off" aria-pressed="false"><span class="fc-dot fc-dot-off" aria-hidden="true"></span><?php esc_html_e( 'Not protected', 'formconfirmed' ); ?></button>
+			</div>
+			<p class="fc-toolbar-count" data-fc-shown role="status"></p>
+		</div>
+		<div class="fc-card fc-empty fc-no-match" data-fc-nomatch hidden>
+			<svg class="fc-empty-art" viewBox="0 0 64 48" aria-hidden="true" focusable="false"><rect x="6" y="8" width="40" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M14 18h24M14 25h16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="46" cy="32" r="9" fill="#fff" stroke="currentColor" stroke-width="2.5"/><path d="M52.5 38.5 58 44" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+			<p class="fc-empty-title"><?php esc_html_e( 'No form matches.', 'formconfirmed' ); ?></p>
+			<p><button type="button" class="button" data-fc-reset><?php esc_html_e( 'Show all forms', 'formconfirmed' ); ?></button></p>
+		</div>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" data-fc-forms-form>
 			<?php wp_nonce_field( 'formconfirmed_save_forms' ); ?>
 			<input type="hidden" name="action" value="formconfirmed_save_forms">
 			<div class="fc-card fc-card-tight">
@@ -586,12 +654,12 @@ class Formconfirmed_Admin {
 				$avail = Formconfirmed_Core::available( $a );
 				$forms = in_array( $a, Formconfirmed_Core::PER_FORM, true ) ? Formconfirmed_Core::forms_of( $a ) : array();
 				?>
-				<section class="fc-card fc-place<?php echo $avail ? '' : ' fc-place-off'; ?>" aria-labelledby="fc-h-<?php echo esc_attr( $a ); ?>">
+				<section class="fc-card fc-place<?php echo $avail ? '' : ' fc-place-off'; ?>" aria-labelledby="fc-h-<?php echo esc_attr( $a ); ?>" data-fc-adapter="<?php echo esc_attr( $a ); ?>" data-fc-perform="<?php echo in_array( $a, Formconfirmed_Core::PER_FORM, true ) ? '1' : '0'; ?>" data-fc-avail="<?php echo $avail ? '1' : '0'; ?>" data-fc-name="<?php echo esc_attr( $labels[ $a ] ); ?>">
 					<div class="fc-place-head">
 						<h2 id="fc-h-<?php echo esc_attr( $a ); ?>"><?php echo esc_html( $labels[ $a ] ); ?>
 							<?php if ( $avail && $forms ) : ?>
 								<?php $on_forms = count( array_filter( array_keys( $forms ), function ( $id ) use ( $a ) { return Formconfirmed_Core::form_enabled( $a, $id ); } ) ); ?>
-								<span class="fc-badge fc-badge-<?php echo esc_attr( in_array( $a, $o['adapters'], true ) && $on_forms ? 'on' : 'off' ); ?>">
+								<span class="fc-badge fc-badge-<?php echo esc_attr( in_array( $a, $o['adapters'], true ) && $on_forms ? 'on' : 'off' ); ?>" data-fc-badge data-fc-total="<?php echo esc_attr( (string) count( $forms ) ); ?>">
 									<?php
 									/* translators: 1: number of protected forms, 2: number of forms */
 									echo esc_html( sprintf( __( '%1$d of %2$d forms', 'formconfirmed' ), in_array( $a, $o['adapters'], true ) ? $on_forms : 0, count( $forms ) ) );
@@ -619,7 +687,7 @@ class Formconfirmed_Admin {
 								<thead><tr><th scope="col"><?php esc_html_e( 'Protected', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Form', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'ID', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Dashboard form ID', 'formconfirmed' ); ?></th></tr></thead>
 								<tbody>
 								<?php foreach ( $forms as $id => $title ) : ?>
-									<tr>
+									<tr data-fc-row data-fc-name="<?php echo esc_attr( $title ); ?>">
 										<td>
 											<input type="hidden" name="seen[<?php echo esc_attr( $a ); ?>][]" value="<?php echo esc_attr( $id ); ?>">
 											<?php self::toggle( 'forms[' . $a . '][' . $id . ']', Formconfirmed_Core::form_enabled( $a, $id ), '', 'fc-f-' . $a . '-' . $id ); ?>
@@ -647,8 +715,91 @@ class Formconfirmed_Admin {
 				<p><?php esc_html_e( 'Theme forms or forms of other plugins: put the shortcode [formconfirmed] into the form and check the submission with formconfirmed_check().', 'formconfirmed' ); ?>
 				<a href="<?php echo esc_url( self::url( array( 'tab' => 'developers' ) ) ); ?>"><?php esc_html_e( 'How it works', 'formconfirmed' ); ?></a></p>
 			</div>
+			<div class="fc-savebar" data-fc-savebar hidden>
+				<span class="fc-savebar-text"><span class="dashicons dashicons-edit" aria-hidden="true"></span> <span data-fc-savebar-text></span></span>
+				<button type="button" class="button" data-fc-undo><?php esc_html_e( 'Undo changes', 'formconfirmed' ); ?></button>
+				<button type="submit" class="button button-primary"><?php esc_html_e( 'Save forms', 'formconfirmed' ); ?></button>
+			</div>
 			<?php submit_button( __( 'Save forms', 'formconfirmed' ) ); ?>
 		</form>
+		<?php
+	}
+
+	/**
+	 * "What happens to a submission": the four answers of the service and where each one ends, after the saved
+	 * settings. With the script it follows the switches above before they are saved. Counts come from the saved
+	 * counters of this site; nothing is fetched.
+	 *
+	 * @param array $o Options.
+	 */
+	private static function flow_preview( $o ) {
+		$s         = $o['stats'];
+		$delegated = Formconfirmed_Backup::delegated();
+		$hold      = 'reject' !== $o['uncertain'];
+		$backup    = $delegated || ! empty( $o['backup'] );
+		$t_hold    = __( 'Held for review (14 days)', 'formconfirmed' );
+		$t_reject  = __( 'Refused, a copy is kept', 'formconfirmed' );
+		$t_c_on    = __( 'The service checks the token, the e-mail address, the name and the message text.', 'formconfirmed' );
+		$t_c_off   = __( 'The service checks the token and the e-mail address; the message text stays on this site.', 'formconfirmed' );
+		$so_far = static function ( $n ) {
+			/* translators: %s: number of messages */
+			return sprintf( _n( '%s so far', '%s so far', (int) $n, 'formconfirmed' ), number_format_i18n( (int) $n ) );
+		};
+		$unclear = static function () use ( $hold, $t_hold, $t_reject ) {
+			?>
+			<span class="fc-flow-node fc-flow-out fc-flow-unclear <?php echo esc_attr( $hold ? 'fc-tone-warn' : 'fc-tone-bad' ); ?>" data-fc-hold="<?php echo esc_attr( $t_hold ); ?>" data-fc-reject="<?php echo esc_attr( $t_reject ); ?>"><?php echo esc_html( $hold ? $t_hold : $t_reject ); ?></span>
+			<?php
+		};
+		?>
+		<section class="fc-card fc-flow" aria-labelledby="fc-flow-title" data-fc-flow data-fc-delegated="<?php echo $delegated ? '1' : '0'; ?>">
+			<div class="fc-card-head">
+				<h2 id="fc-flow-title"><span class="dashicons dashicons-randomize" aria-hidden="true"></span> <?php esc_html_e( 'What happens to a submission', 'formconfirmed' ); ?></h2>
+				<span class="fc-badge fc-badge-waiting" data-fc-flow-unsaved hidden><?php esc_html_e( 'Preview - not saved yet', 'formconfirmed' ); ?></span>
+			</div>
+			<p class="fc-flow-check"><span class="dashicons dashicons-shield-alt" aria-hidden="true"></span> <span data-fc-content-on="<?php echo esc_attr( $t_c_on ); ?>" data-fc-content-off="<?php echo esc_attr( $t_c_off ); ?>"><?php echo esc_html( ! empty( $o['content'] ) ? $t_c_on : $t_c_off ); ?></span></p>
+			<ol class="fc-flow-rows" aria-live="polite">
+				<li class="fc-flow-row">
+					<span class="fc-flow-node fc-flow-in fc-tone-ok"><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> <?php esc_html_e( 'Answer: allow', 'formconfirmed' ); ?></span>
+					<span class="fc-flow-arrow" aria-hidden="true"></span>
+					<span class="fc-flow-node fc-flow-out fc-tone-ok"><?php esc_html_e( 'Delivered', 'formconfirmed' ); ?></span>
+					<span class="fc-flow-n"><?php echo esc_html( $so_far( $s['allow'] ) ); ?></span>
+				</li>
+				<li class="fc-flow-row">
+					<span class="fc-flow-node fc-flow-in fc-tone-bad"><span class="dashicons dashicons-dismiss" aria-hidden="true"></span> <?php esc_html_e( 'Answer: block', 'formconfirmed' ); ?></span>
+					<span class="fc-flow-arrow" aria-hidden="true"></span>
+					<span class="fc-flow-node fc-flow-out fc-tone-bad"><?php echo esc_html( $t_reject ); ?></span>
+					<span class="fc-flow-n"><?php echo esc_html( $so_far( $s['block'] ) ); ?></span>
+				</li>
+				<li class="fc-flow-row">
+					<span class="fc-flow-node fc-flow-in fc-tone-warn"><span class="dashicons dashicons-flag" aria-hidden="true"></span> <?php esc_html_e( 'Answer: flag', 'formconfirmed' ); ?></span>
+					<span class="fc-flow-arrow" aria-hidden="true"></span>
+					<?php $unclear(); ?>
+					<span class="fc-flow-n"><?php echo esc_html( $so_far( $s['flag'] ) ); ?></span>
+				</li>
+				<li class="fc-flow-row fc-flow-row-split">
+					<span class="fc-flow-node fc-flow-in fc-tone-gray"><span class="dashicons dashicons-warning" aria-hidden="true"></span> <?php esc_html_e( 'No clear answer', 'formconfirmed' ); ?></span>
+					<span class="fc-flow-n fc-flow-n-in"><?php echo esc_html( $so_far( $s['unreachable'] ) ); ?></span>
+					<span class="fc-flow-arrow" aria-hidden="true"></span>
+					<span class="fc-flow-branch">
+						<span class="fc-flow-node fc-flow-mid<?php echo $backup ? '' : ' is-off'; ?>" data-fc-backup-node>
+							<span class="dashicons dashicons-backup" aria-hidden="true"></span>
+							<span data-fc-backup-on="<?php echo esc_attr( $delegated ? __( 'Backup check: formexposed protection layer', 'formconfirmed' ) : __( 'Backup check on this site', 'formconfirmed' ) ); ?>" data-fc-backup-off="<?php esc_attr_e( 'Backup check off', 'formconfirmed' ); ?>"><?php echo esc_html( $backup ? ( $delegated ? __( 'Backup check: formexposed protection layer', 'formconfirmed' ) : __( 'Backup check on this site', 'formconfirmed' ) ) : __( 'Backup check off', 'formconfirmed' ) ); ?></span>
+						</span>
+						<span class="fc-flow-sub" data-fc-backup-pass<?php echo $backup ? '' : ' hidden'; ?>>
+							<span class="fc-flow-label"><?php esc_html_e( 'passed', 'formconfirmed' ); ?></span>
+							<span class="fc-flow-arrow" aria-hidden="true"></span>
+							<span class="fc-flow-node fc-flow-out fc-tone-ok"><?php esc_html_e( 'Delivered', 'formconfirmed' ); ?></span>
+							<span class="fc-flow-n"><?php echo esc_html( $so_far( $s['fallback'] ) ); ?></span>
+						</span>
+						<span class="fc-flow-sub">
+							<span class="fc-flow-label" data-fc-backup-fail-label<?php echo $backup ? '' : ' hidden'; ?>><?php esc_html_e( 'not passed', 'formconfirmed' ); ?></span>
+							<span class="fc-flow-arrow" aria-hidden="true"></span>
+							<?php $unclear(); ?>
+						</span>
+					</span>
+				</li>
+			</ol>
+		</section>
 		<?php
 	}
 
@@ -714,6 +865,7 @@ class Formconfirmed_Admin {
 				</fieldset>
 				<p class="description"><?php esc_html_e( 'Never: let it through unseen. Registrations are always refused in that case; logins are decided by the password.', 'formconfirmed' ); ?></p>
 			</div>
+			<?php self::flow_preview( $o ); ?>
 			<?php submit_button(); ?>
 		</form>
 		<?php
@@ -759,16 +911,54 @@ class Formconfirmed_Admin {
 			echo '<p>' . esc_html__( 'Messages land here when the service flags them, blocks them, or gives no clear answer and the backup check did not pass. Nothing waits for review right now.', 'formconfirmed' ) . '</p></div>';
 			return;
 		}
+		$tones = array( 'bad' => 0, 'warn' => 0, 'gray' => 0 );
+		foreach ( $rows as $r ) {
+			++$tones[ self::reason_tone( $r['reason'] ) ];
+		}
+		$tone_labels = array(
+			'bad'  => __( 'Blocked by the service', 'formconfirmed' ),
+			'warn' => __( 'Flagged as suspicious', 'formconfirmed' ),
+			'gray' => __( 'No clear answer', 'formconfirmed' ),
+		);
 		?>
+		<div class="fc-card fc-card-tight fc-held-summary" data-fc-held-summary>
+			<h2 class="fc-held-summary-title"><?php esc_html_e( 'Why the messages on this page were held', 'formconfirmed' ); ?></h2>
+			<div class="fc-dist-bar" aria-hidden="true">
+				<?php foreach ( $tones as $tone => $n ) : ?>
+					<?php if ( $n ) : ?>
+						<span class="fc-seg-<?php echo esc_attr( $tone ); ?>" style="flex-grow:<?php echo esc_attr( (string) $n ); ?>"></span>
+					<?php endif; ?>
+				<?php endforeach; ?>
+			</div>
+			<ul class="fc-legend">
+				<?php foreach ( $tones as $tone => $n ) : ?>
+					<?php if ( $n ) : ?>
+						<li><span class="fc-legend-item" data-fc-reason="<?php echo esc_attr( $tone ); ?>"><span class="fc-dot fc-dot-<?php echo esc_attr( $tone ); ?>" aria-hidden="true"></span> <?php echo esc_html( $tone_labels[ $tone ] ); ?> <strong><?php echo esc_html( number_format_i18n( $n ) ); ?></strong></span></li>
+					<?php endif; ?>
+				<?php endforeach; ?>
+			</ul>
+		</div>
 		<div class="fc-table-scroll"><table class="widefat striped fc-held">
 			<thead><tr><th scope="col"><?php esc_html_e( 'Received', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Form', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Why', 'formconfirmed' ); ?></th><th scope="col"><?php esc_html_e( 'Message', 'formconfirmed' ); ?></th><th scope="col"><span class="screen-reader-text"><?php esc_html_e( 'Actions', 'formconfirmed' ); ?></span></th></tr></thead>
 			<tbody>
 			<?php foreach ( $rows as $r ) : ?>
-				<tr>
+				<?php $left = self::days_left( $r['date'] ); ?>
+				<tr data-fc-reason="<?php echo esc_attr( self::reason_tone( $r['reason'] ) ); ?>">
 					<td><?php echo esc_html( get_date_from_gmt( $r['date'], get_option( 'date_format' ) . ' ' . get_option( 'time_format' ) ) ); ?>
-						<span class="fc-ago"><?php echo esc_html( self::ago( strtotime( $r['date'] . ' UTC' ) ) ); ?></span></td>
+						<span class="fc-ago"><?php echo esc_html( self::ago( strtotime( $r['date'] . ' UTC' ) ) ); ?></span>
+						<span class="fc-keep<?php echo $left <= 3 ? ' is-soon' : ''; ?>">
+							<span class="fc-keep-bar" aria-hidden="true"><span style="<?php echo esc_attr( 'width:' . round( $left / Formconfirmed_Held::DAYS * 100 ) . '%' ); ?>"></span></span>
+							<?php
+							echo esc_html(
+								$left > 0
+									/* translators: %d: number of days until the held message is removed */
+									? sprintf( _n( 'Removed in %d day', 'Removed in %d days', $left, 'formconfirmed' ), $left )
+									: __( 'Removed with the next cleanup', 'formconfirmed' )
+							);
+							?>
+						</span></td>
 					<td><span class="fc-form-name"><?php echo esc_html( $r['form'] ); ?></span></td>
-					<td><?php $why = 'fc_block' === $r['reason'] ? array( 'bad', 'dismiss' ) : ( 'fc_flag' === $r['reason'] ? array( 'warn', 'flag' ) : array( 'gray', 'warning' ) ); ?>
+					<td><?php $why = array( self::reason_tone( $r['reason'] ), array( 'bad' => 'dismiss', 'warn' => 'flag', 'gray' => 'warning' )[ self::reason_tone( $r['reason'] ) ] ); ?>
 						<span class="fc-why fc-why-<?php echo esc_attr( $why[0] ); ?>"><span class="dashicons dashicons-<?php echo esc_attr( $why[1] ); ?>" aria-hidden="true"></span> <?php echo esc_html( Formconfirmed_Held::reason_text( $r['reason'] ) ); ?></span></td>
 					<td>
 						<?php foreach ( $r['pairs'] as $pair ) : ?>
@@ -809,6 +999,17 @@ class Formconfirmed_Admin {
 		</table></div>
 		<?php self::held_pagination( $list ); ?>
 		<?php
+	}
+
+	/** Colour group of a reason: bad (blocked), warn (flagged) or gray (no clear answer). */
+	private static function reason_tone( $reason ) {
+		return 'fc_block' === $reason ? 'bad' : ( 'fc_flag' === $reason ? 'warn' : 'gray' );
+	}
+
+	/** Whole days a held message still waits before the cleanup removes it (0 = due). */
+	private static function days_left( $date_gmt ) {
+		$age = max( 0, time() - (int) strtotime( $date_gmt . ' UTC' ) );
+		return max( 0, Formconfirmed_Held::DAYS - (int) floor( $age / DAY_IN_SECONDS ) );
 	}
 
 	private static function held_filters( $f ) {

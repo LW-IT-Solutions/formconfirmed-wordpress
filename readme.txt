@@ -4,7 +4,7 @@ Tags: spam, anti-spam, captcha, contact form 7, honeypot
 Requires at least: 6.2
 Tested up to: 7.2
 Requires PHP: 7.4
-Stable tag: 1.7.0
+Stable tag: 1.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -139,6 +139,14 @@ Form references: numeric provider form IDs are namespaced per installation. Core
 Technical report status is stored locally without response text, keys or hostnames. Failed deliveries retain the last accepted time and schedule a retry after 5, 10, 20, 40 and at most 60 minutes. Requests are at least 30 seconds apart. Manual retries require manage_options, POST and the action nonce. WP-Cron requires site visits (or a separately configured system cron).
 
 == Changelog ==
+
+= 1.8.0 =
+* Overview: a ring chart shows how the answers of the service divide. Pointing at or focusing a segment or a tile names its number and share in the middle; the counters count up once when they appear (not with reduced motion).
+* Settings: "What happens to a submission" shows where allowed, blocked, flagged and unclear messages end with the current settings, and follows the switches before they are saved.
+* Forms: search with highlighted matches (shortcut /) and a filter for protected or not protected forms.
+* Forms: the count of protected forms and the badge of each form plugin update while switching; a bar at the bottom names the unsaved changes, with Save and Undo.
+* Held messages: a bar and legend show why the messages of the page were held, and the legend filters the rows.
+* Held messages: each message shows how many days remain until the cleanup removes it.
 
 = 1.7.0 =
 * Overview: a shield shows the state of the protection, a checklist names what protects the forms (protected forms, message check, backup check, what happens to unclear messages), and a bar shows how the answers of the service divide into allowed, blocked, flagged and without a clear answer, with shares in percent.
